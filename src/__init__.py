@@ -1,0 +1,1 @@
+"""Traffic safety application package."""
