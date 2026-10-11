@@ -18,7 +18,7 @@ from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
 from fractions import Fraction
-from typing import Any, Deque, Dict, List, Optional, Set, Tuple, TypedDict, Union
+from typing import Any, Deque, Dict, List, Optional, Set, Tuple, TypedDict, Union, cast
 
 import aiohttp
 import cv2
@@ -51,6 +51,12 @@ CITIZEN_UPLOAD_DIR = os.path.join(UPLOADS_DIR, "citizen_uploads")
 EVIDENCE_DIR = os.path.join(PROJECT_ROOT, "evidence", "violations")
 CSV_LOG_FILE = os.path.join(DATA_DIR, "traffic_violations_log.csv")
 DEFAULT_MODEL_PATH = os.path.join(PROJECT_ROOT, "assets", "models", "yolov8n.pt")
+
+
+def _as_numpy_array(value: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy()
+    return value
 
 
 def _project_path(path: str) -> str:
@@ -483,7 +489,7 @@ class PedestrianAttributeClassifier:
         try:
             rgb_img = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
             pil_img = Image.fromarray(np.ascontiguousarray(rgb_img, dtype=np.uint8))
-            tensor = self.transform(pil_img)
+            tensor = cast(torch.Tensor, self.transform(pil_img))
             tensor = tensor.unsqueeze(0).to(self.device)
 
             with torch.no_grad():
@@ -2132,16 +2138,16 @@ class APPoliceRadarSafetyEngine:
             model_names: Any = self.model.names
 
             if result_list and len(result_list) > 0 and result_list[0].boxes is not None and result_list[0].boxes.xyxy is not None:
-                boxes = result_list[0].boxes.xyxy.cpu().numpy().astype(int)
+                boxes = _as_numpy_array(result_list[0].boxes.xyxy).astype(int)
                 model_names = getattr(result_list[0], "names", model_names)
                 track_ids = (
-                    result_list[0].boxes.id.cpu().numpy().astype(int)
+                    _as_numpy_array(result_list[0].boxes.id).astype(int)
                     if result_list[0].boxes.id is not None
                     else np.arange(len(boxes))
                 )
-                class_ids = result_list[0].boxes.cls.cpu().numpy().astype(int)
+                class_ids = _as_numpy_array(result_list[0].boxes.cls).astype(int)
                 if result_list[0].boxes.conf is not None:
-                    confidences = result_list[0].boxes.conf.cpu().numpy()
+                    confidences = _as_numpy_array(result_list[0].boxes.conf)
             elif not self.grabber.has_source:
                 v_boxes = [[int(v["x"]), int(v["y"]), int(v["x"]) + 90, int(v["y"]) + 140] for v in
                            self.grabber.sim_vehicles]

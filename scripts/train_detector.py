@@ -53,9 +53,13 @@ def train_detector(
         name=name,
         exist_ok=False,
     )
-    if model.trainer is None:
+    trainer = model.trainer
+    if trainer is None:
         raise RuntimeError("YOLO training completed without exposing its trainer output.")
-    run_directory = Path(model.trainer.save_dir)
+    save_dir = trainer.save_dir
+    if save_dir is None:
+        raise RuntimeError("YOLO training completed without exposing its run directory.")
+    run_directory = Path(save_dir)
     best_weights = run_directory / "weights" / "best.pt"
     if not best_weights.is_file():
         raise FileNotFoundError(f"Training finished without producing best weights: {best_weights}")

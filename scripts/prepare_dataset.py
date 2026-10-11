@@ -1,9 +1,10 @@
 import argparse
+import csv
 import json
 import math
 import random
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 IMAGE_EXTENSIONS = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
@@ -48,6 +49,79 @@ def _yaml_string(value: str) -> str:
     return json.dumps(value)
 
 
+def _load_group_assignments(
+    group_file: Path, images: list[Path], images_dir: Path
+) -> dict[str, str]:
+    expected_images = {image.relative_to(images_dir).as_posix() for image in images}
+    assignments = {}
+    try:
+        with group_file.open("r", newline="", encoding="utf-8-sig") as source_file:
+            reader = csv.DictReader(source_file)
+            if not {"image", "group"}.issubset(reader.fieldnames or []):
+                raise ValueError("Group CSV must have 'image' and 'group' columns.")
+            for row_number, row in enumerate(reader, start=2):
+                image_value = (row.get("image") or "").strip().replace("\\", "/")
+                group = (row.get("group") or "").strip()
+                image_path = PurePosixPath(image_value)
+                if (
+                    not image_value
+                    or image_path.is_absolute()
+                    or ".." in image_path.parts
+                    or ":" in image_value
+                ):
+                    raise ValueError(f"{group_file}:{row_number}: image must be a relative path.")
+                image_key = image_path.as_posix()
+                if image_key in assignments:
+                    raise ValueError(f"{group_file}:{row_number}: duplicate image entry: {image_key}")
+                if image_key not in expected_images:
+                    raise ValueError(
+                        f"{group_file}:{row_number}: image not found in source: {image_key}"
+                    )
+                if not group:
+                    raise ValueError(f"{group_file}:{row_number}: group must not be empty.")
+                assignments[image_key] = group
+    except csv.Error as exc:
+        raise ValueError(f"Could not parse group CSV {group_file}: {exc}") from exc
+
+    missing_images = expected_images - assignments.keys()
+    if missing_images:
+        raise ValueError(f"Group CSV is missing image entry: {sorted(missing_images)[0]}")
+    return assignments
+
+
+def _grouped_split_indices(
+    images: list[Path],
+    images_dir: Path,
+    assignments: dict[str, str],
+    val_ratio: float,
+    test_ratio: float,
+    seed: int,
+) -> tuple[set[int], set[int]]:
+    groups: dict[str, list[int]] = {}
+    for index, image in enumerate(images):
+        group = assignments[image.relative_to(images_dir).as_posix()]
+        groups.setdefault(group, []).append(index)
+    if len(groups) < 3:
+        raise ValueError("Group-based splitting requires at least three distinct groups.")
+
+    group_order = list(groups)
+    random.Random(seed).shuffle(group_order)
+    test_indices: set[int] = set()
+    val_indices: set[int] = set()
+    cursor = 0
+    for target_count, selected_indices, groups_to_reserve in (
+        (max(1, round(len(images) * test_ratio)), test_indices, 2),
+        (max(1, round(len(images) * val_ratio)), val_indices, 1),
+    ):
+        selected_count = 0
+        while len(group_order) - cursor > groups_to_reserve and selected_count < target_count:
+            selected_group = group_order[cursor]
+            selected_indices.update(groups[selected_group])
+            selected_count += len(groups[selected_group])
+            cursor += 1
+    return test_indices, val_indices
+
+
 def prepare_dataset(
     source: Path,
     output: Path,
@@ -55,6 +129,7 @@ def prepare_dataset(
     val_ratio: float = 0.2,
     test_ratio: float = 0.1,
     seed: int = 42,
+    group_file: Path | None = None,
 ) -> Path:
     source = source.resolve()
     output = output.resolve()
@@ -104,17 +179,23 @@ def prepare_dataset(
     if unexpected_labels:
         raise ValueError(f"Label file has no matching image: {unexpected_labels[0]}")
 
-    shuffled_indices = list(range(len(images)))
-    random.Random(seed).shuffle(shuffled_indices)
-    test_count = max(1, round(len(images) * test_ratio))
-    val_count = max(1, round(len(images) * val_ratio))
-    while test_count + val_count >= len(images):
-        if val_count >= test_count:
-            val_count -= 1
-        else:
-            test_count -= 1
-    test_indices = set(shuffled_indices[:test_count])
-    val_indices = set(shuffled_indices[test_count:test_count + val_count])
+    if group_file is not None:
+        assignments = _load_group_assignments(group_file.resolve(), images, images_dir)
+        test_indices, val_indices = _grouped_split_indices(
+            images, images_dir, assignments, val_ratio, test_ratio, seed
+        )
+    else:
+        shuffled_indices = list(range(len(images)))
+        random.Random(seed).shuffle(shuffled_indices)
+        test_count = max(1, round(len(images) * test_ratio))
+        val_count = max(1, round(len(images) * val_ratio))
+        while test_count + val_count >= len(images):
+            if val_count >= test_count:
+                val_count -= 1
+            else:
+                test_count -= 1
+        test_indices = set(shuffled_indices[:test_count])
+        val_indices = set(shuffled_indices[test_count:test_count + val_count])
 
     for index, (image, label) in enumerate(zip(images, label_paths)):
         split = "test" if index in test_indices else "val" if index in val_indices else "train"
@@ -152,11 +233,22 @@ def main() -> None:
     parser.add_argument("--val-ratio", type=float, default=0.2)
     parser.add_argument("--test-ratio", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--group-csv",
+        type=Path,
+        help="Optional CSV with image,group columns to keep each capture session in one split.",
+    )
     args = parser.parse_args()
 
     try:
         dataset_yaml = prepare_dataset(
-            args.source, args.output, args.classes, args.val_ratio, args.test_ratio, args.seed
+            args.source,
+            args.output,
+            args.classes,
+            args.val_ratio,
+            args.test_ratio,
+            args.seed,
+            args.group_csv,
         )
     except (FileExistsError, OSError, ValueError) as exc:
         parser.error(str(exc))
