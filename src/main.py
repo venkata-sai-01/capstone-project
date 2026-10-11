@@ -11,8 +11,6 @@ import random
 import re
 import sqlite3
 import shutil
-import subprocess
-import sys
 import threading
 import time
 import uuid
@@ -39,6 +37,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from scipy.optimize import minimize
 from ultralytics import YOLO
 
+if __package__:
+    from src.config import load_local_environment
+else:
+    from config import load_local_environment
+
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
@@ -54,50 +57,13 @@ def _project_path(path: str) -> str:
     return os.path.abspath(os.path.join(PROJECT_ROOT, path))
 
 
-def _load_local_environment() -> None:
-    env_path = os.path.join(PROJECT_ROOT, ".env")
-    if not os.path.isfile(env_path):
-        return
-
-    with open(env_path, encoding="utf-8") as env_file:
-        for line_number, line in enumerate(env_file, start=1):
-            entry = line.strip()
-            if not entry or entry.startswith("#"):
-                continue
-            key, separator, value = entry.partition("=")
-            key = key.strip()
-            value = value.strip()
-            if not separator or not key or not value:
-                raise ValueError(f"Invalid .env entry on line {line_number}.")
-            if value[:1] in {"'", '"'} and value[-1:] == value[:1]:
-                value = value[1:-1]
-            os.environ.setdefault(key, value)
-
-
-_load_local_environment()
+load_local_environment(PROJECT_ROOT)
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 if "REPLACE_WITH_APP_PASSWORD" in DATABASE_URL:
-    setup_script = os.path.join(PROJECT_ROOT, "configure_postgres.py")
-    if __name__ == "__main__" and os.path.isfile(setup_script):
-        print(
-            "PostgreSQL still has the sample password. Complete the hidden password "
-            "prompts below to configure and verify the local app credentials."
-        )
-        setup_result = subprocess.run([sys.executable, setup_script], check=False)
-        if setup_result.returncode != 0:
-            raise SystemExit(
-                "PostgreSQL setup did not complete. Correct the prompted value(s) and "
-                "run this command again."
-            )
-        os.environ.pop("DATABASE_URL", None)
-        _load_local_environment()
-        DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-    if "REPLACE_WITH_APP_PASSWORD" in DATABASE_URL:
-        raise RuntimeError(
-            "DATABASE_URL still contains the example password. Run this script directly "
-            "in a terminal so it can prompt for credentials, or run "
-            "'python configure_postgres.py' first."
-        )
+    raise RuntimeError(
+        "DATABASE_URL still contains the example password. Set DATABASE_URL in .env "
+        "to the connection URL for your PostgreSQL database."
+    )
 SQLITE_DATABASE_DIR = _project_path(os.environ.get("SQLITE_DATABASE_DIR", "data").strip() or "data")
 DASHBOARD_API_URL = os.environ.get("DASHBOARD_API_URL", "").strip().rstrip("/")
 DASHBOARD_UI_URL = os.environ.get("DASHBOARD_UI_URL", "http://127.0.0.1:8080").strip().rstrip("/")
@@ -170,12 +136,10 @@ def _connect_database(db_file: str) -> _DatabaseConnection:
         try:
             connection = psycopg.connect(DATABASE_URL)
         except psycopg.OperationalError as exc:
-            if getattr(exc, "sqlstate", None) == "28P01":
+            if getattr(exc, "sqlstate", None) in {"28P01", "28000"}:
                 raise RuntimeError(
-                    "PostgreSQL rejected the DATABASE_URL password for traffic_app. "
-                    "Run 'python configure_postgres.py' from a terminal and enter the "
-                    "correct local PostgreSQL administrator password to reset and verify "
-                    "the app credentials."
+                    "PostgreSQL rejected the credentials in DATABASE_URL. Verify the "
+                    "username, password, database name, and server access settings."
                 ) from exc
             raise
         return _DatabaseConnection(connection, is_postgres=True)

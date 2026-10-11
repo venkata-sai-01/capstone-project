@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+datasets/
+runs/
 .env
 .streamlit/secrets.toml
 data/*.db
