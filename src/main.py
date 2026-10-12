@@ -931,9 +931,16 @@ class APCCTNSHotlistDatabase:
                               "action": "BROADCAST_ALL_PATROLS"}
         }
 
+    @staticmethod
+    def _normalize_plate(plate: str) -> str:
+        return re.sub(r"[\s\-]", "", str(plate or "")).upper()
+
     def check_hotlist(self, plate: str) -> Optional[Dict[str, str]]:
-        clean = plate.strip().upper()
-        return self.blacklist_plates.get(clean, None)
+        clean = self._normalize_plate(plate)
+        for known_plate, details in self.blacklist_plates.items():
+            if self._normalize_plate(known_plate) == clean:
+                return details
+        return None
 
 
 class APRTOIntegrationGateway:
@@ -1083,13 +1090,20 @@ class APVehicleRegistryEngine:
             "reg_date": str(row[13])
         }
 
+    @staticmethod
+    def _normalize_plate(plate: str) -> str:
+        return re.sub(r"[\s\-]", "", str(plate or "")).upper()
+
     def resolve_plate_to_profile(self, raw_plate: str, v_type: str = "car") -> Dict[str, Any]:
-        clean_plate = raw_plate.upper().replace(" ", "").replace("-", "")
+        clean_plate = self._normalize_plate(raw_plate)
 
         with self.lock:
             cur = self.conn.cursor()
             # language=sqlite
-            cur.execute("SELECT * FROM vahan_registry WHERE plate = ?", (raw_plate,))
+            cur.execute(
+                "SELECT * FROM vahan_registry WHERE UPPER(REPLACE(REPLACE(plate, ' ', ''), '-', '')) = ?",
+                (clean_plate,)
+            )
             row = cur.fetchone()
             self.conn.commit()
             if row:
@@ -1125,6 +1139,10 @@ class APVehicleRegistryEngine:
             "reg_date": f"{rng.randint(2017, 2024):04d}-{rng.randint(1, 12):02d}-{rng.randint(1, 28):02d}"
         }
 
+        canonical_plate = self._normalize_plate(raw_plate)
+        canonical_profile = dict(profile)
+        canonical_profile["plate"] = canonical_plate
+
         with self.lock:
             cur = self.conn.cursor()
             # language=sqlite
@@ -1139,14 +1157,14 @@ class APVehicleRegistryEngine:
                     insurance_status=excluded.insurance_status, puc_status=excluded.puc_status,
                     reg_date=excluded.reg_date;
             """, (
-                profile["plate"], profile["owner_name"], profile["dl_number"], profile["district"],
-                profile["dto_office"], profile["region"], profile["pin_code"], profile["make_model"],
-                profile["veh_class"], profile["fuel_type"], profile["fastag_id"],
-                profile["insurance_status"], profile["puc_status"], profile["reg_date"]
+                canonical_plate, canonical_profile["owner_name"], canonical_profile["dl_number"], canonical_profile["district"],
+                canonical_profile["dto_office"], canonical_profile["region"], canonical_profile["pin_code"], canonical_profile["make_model"],
+                canonical_profile["veh_class"], canonical_profile["fuel_type"], canonical_profile["fastag_id"],
+                canonical_profile["insurance_status"], canonical_profile["puc_status"], canonical_profile["reg_date"]
             ))
             self.conn.commit()
 
-        return profile
+        return canonical_profile
 
     def search_records(self, query: str) -> List[Dict[str, Any]]:
         q = query.strip().upper()

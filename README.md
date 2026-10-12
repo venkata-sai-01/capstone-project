@@ -192,6 +192,14 @@ records can be started with:
 
 In VS Code, use **Terminal → Run Task** and choose either app task.
 
+## Run tests
+
+Run the automated test suite with:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
 ## Project layout
 
 ```text
