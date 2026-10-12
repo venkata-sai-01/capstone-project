@@ -4559,7 +4559,8 @@ async def api_quantum_qaoa_optimize(request: Request):
         result = await asyncio.to_thread(opt.optimize_corridor_flow, congestion_weights=congestion)
         return JSONResponse(result)
     except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+        print(f"Error in /api/quantum/qaoa_optimize: {e}")
+        return JSONResponse({"status": "error", "message": "An internal error occurred."}, status_code=500)
 
 
 @app.post("/api/quantum/grover_search")
@@ -4571,7 +4572,8 @@ async def api_quantum_grover_search(request: Request):
         result = await asyncio.to_thread(grover_search_engine.quantum_search_plate, target_plate=target_plate)
         return JSONResponse(result)
     except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+        print(f"Error in /api/quantum/grover_search: {e}")
+        return JSONResponse({"status": "error", "message": "An internal error occurred."}, status_code=500)
 
 
 @app.post("/api/quantum/qsvm_hazard_classify")
@@ -4592,7 +4594,8 @@ async def api_quantum_qsvm_classify(request: Request):
         )
         return JSONResponse(result)
     except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+        print(f"Error in /api/quantum/qsvm_hazard_classify: {e}")
+        return JSONResponse({"status": "error", "message": "An internal error occurred."}, status_code=500)
 
 
 @app.get("/api/quantum/status")
