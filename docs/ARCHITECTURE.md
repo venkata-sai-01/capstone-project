@@ -36,6 +36,145 @@ flowchart LR
     Weights -. configured at runtime .-> Runtime
 ```
 
+## Project flowcharts
+
+### Whole-project structure and data flow
+
+This view connects the product's user-facing apps, runtime, persisted data,
+and offline detector development workflow.
+
+```mermaid
+flowchart TB
+    subgraph Inputs["Inputs and users"]
+        Camera["Camera / RTSP"]
+        Video["Video file"]
+        Simulator["Traffic simulator"]
+        Operator["Traffic operator"]
+        Citizen["Citizen / API client"]
+        Images["Authorized road images + YOLO labels"]
+    end
+
+    subgraph Apps["Application entry points"]
+        Main["src/main.py<br/>FastAPI runtime"]
+        OpsUI["Operations dashboard<br/>FastAPI-served UI"]
+        ApiUI["API Explorer<br/>FastAPI-served UI"]
+        RecordsUI["dashboard/app.py<br/>Streamlit read-only viewer"]
+    end
+
+    subgraph Processing["In-process traffic processing"]
+        Ingest["Frame grabber"]
+        Enhance["Weather analysis<br/>image enhancement + ROI"]
+        Detect["YOLO tracking"]
+        Analyze["Vehicle speed, trajectory,<br/>risk and incident analysis"]
+        Operations["Signals, corridor preemption,<br/>hotlist and safety modules"]
+        Violation["Violation / challan handling"]
+    end
+
+    subgraph Persistence["Persisted outputs"]
+        DB["SQLite files or PostgreSQL"]
+        CSV["Violation CSV"]
+        Evidence["Evidence snapshots"]
+        Uploads["Uploaded video / citizen media"]
+    end
+
+    subgraph Training["Offline detector lifecycle"]
+        Prepare["scripts/prepare_dataset.py"]
+        Splits["Train / validation / test"]
+        Train["scripts/train_detector.py"]
+        Model["assets/models/<br/>selected YOLO weights"]
+    end
+
+    RTO["Sandbox or configured RTO gateway"]
+    Browser["Operator browser"]
+
+    Camera --> Ingest
+    Video --> Ingest
+    Simulator --> Ingest
+    Main --> Ingest
+    Ingest --> Enhance --> Detect --> Analyze
+    Analyze --> Operations
+    Analyze --> Violation
+    Operations --> Violation
+    Violation --> DB
+    Violation --> CSV
+    Violation --> Evidence
+    Violation --> RTO
+    Citizen --> Main
+    Main --> DB
+    Main --> Uploads
+    Operator --> Browser
+    Browser --> OpsUI
+    Browser --> ApiUI
+    OpsUI <-->|REST, WebSocket, WebRTC| Main
+    ApiUI -->|REST| Main
+    RecordsUI -->|read-only| DB
+    RecordsUI -->|read-only| CSV
+    Images --> Prepare --> Splits --> Train --> Model
+    Model -. configured for inference .-> Detect
+```
+
+### Live traffic and violation flow
+
+```mermaid
+flowchart TD
+    Start["Select camera, RTSP, video, or simulator"] --> Frame["Read next frame"]
+    Frame --> Weather["Estimate visibility / weather"]
+    Weather --> Prepare["Enhance frame and apply ROI mask"]
+    Prepare --> Track["YOLO track objects"]
+    Track --> Classes{"Classify tracked objects"}
+
+    Classes -->|Vehicle| Motion["Update track history and lane"]
+    Motion --> Radar{"Crosses both calibrated radar lines?"}
+    Radar -->|Yes| Speed["Estimate speed from distance and elapsed time"]
+    Radar -->|No| Risk
+    Speed --> Limit{"Speed over configured limit?"}
+    Limit -->|Yes| Violation["Build violation / challan event"]
+    Limit -->|No| Risk["Evaluate predictive risk and incidents"]
+    Risk --> Alert{"Risk or incident alert?"}
+    Alert -->|Yes| Violation
+    Alert -->|No| Telemetry
+
+    Classes -->|Person or animal| Crossing["Check crossing danger zone"]
+    Crossing --> Signals["Update adaptive signal timing"]
+    Signals --> Telemetry["Refresh telemetry and annotated frame"]
+    Violation --> Profile["Resolve vehicle profile, HSRP and hotlist"]
+    Profile --> Fine["Select violation details and fine"]
+    Fine --> Outputs["Save evidence + CSV + telemetry"]
+    Fine --> Ledger["Sign challan and append ledger block"]
+    Ledger --> Queue["Queue asynchronous RTO dispatch"]
+    Queue --> Mode{"Gateway mode"}
+    Mode -->|SANDBOX| Simulate["Simulate dispatch"]
+    Mode -->|PRODUCTION| External["POST to configured RTO endpoint"]
+    Outputs --> Telemetry
+    Simulate --> Telemetry
+    External --> Telemetry
+
+    Telemetry --> Clients["Dashboard: WebSocket telemetry / WebRTC video"]
+    Clients --> Frame
+```
+
+The radar-line speed estimate depends on configured distance and timestamps.
+The diagram describes the implemented processing path; model detections alone
+do not establish every legal violation.
+
+### Development and deployment flow
+
+```mermaid
+flowchart LR
+    Source["src/main.py + src/config.py"] --> Runtime["Run FastAPI traffic system"]
+    Runtime --> APIs["REST / OpenAPI"]
+    Runtime --> Live["Operations UI + live video / telemetry"]
+    Runtime --> Records["SQLite or PostgreSQL records"]
+    Records --> Viewer["Run Streamlit records viewer separately"]
+    Tests["tests/"] --> Verify["Run unittest discovery"]
+
+    Labels["Source images + labels"] --> Prepare["scripts/prepare_dataset.py"]
+    Prepare --> Dataset["Validated reproducible splits + dataset.yaml"]
+    Dataset --> Train["scripts/train_detector.py"]
+    Train --> Weights["Trained best.pt + evaluation metrics"]
+    Weights --> Runtime
+```
+
 ## Runtime components
 
 ### Traffic processing

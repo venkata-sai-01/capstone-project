@@ -225,4 +225,5 @@ database files, model weights, uploads, and evidence stay in their respective
 folders even when it is launched with `python -m src.main`.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the system context,
-runtime components, data stores, and detector lifecycle.
+project and traffic-processing flowcharts, runtime components, data stores,
+and detector lifecycle.
