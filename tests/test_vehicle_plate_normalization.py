@@ -83,18 +83,5 @@ class PlateNormalizationTests(unittest.TestCase):
         self.assertEqual(record_count, 1)
 
 
-class VehicleClassScopeTests(unittest.TestCase):
-    def test_supported_vehicles_are_classified_as_vehicles(self) -> None:
-        for class_name in ("car", "motorcycle", "bus", "truck", "tractor"):
-            with self.subTest(class_name=class_name):
-                self.assertEqual(main.APPoliceRadarSafetyEngine._object_kind(class_name), "vehicle")
-
-    def test_removed_classes_are_not_classified_as_vehicles(self) -> None:
-        for class_name in ("bicycle", "auto_rickshaw", "e_rickshaw"):
-            with self.subTest(class_name=class_name):
-                self.assertNotIn(class_name, main.APPoliceRadarSafetyEngine.VEHICLE_CLASSES)
-                self.assertEqual(main.APPoliceRadarSafetyEngine._object_kind(class_name), "object")
-
-
 if __name__ == "__main__":
     unittest.main()

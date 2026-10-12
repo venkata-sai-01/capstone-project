@@ -69,11 +69,12 @@ There is no single dataset in this project that provides labeled vehicle
 images from every Indian state. The
 [India Driving Dataset (IDD)](https://idd.insaan.iiit.ac.in/) is a useful
 starting point: it has 10,000 road-scene images from 182 drives in Hyderabad,
-Bengaluru, and nearby areas. It is not nationwide, and its published
-annotations are segmentation labels, not the YOLO bounding boxes expected by
-this pipeline. Create or convert instance-level boxes and inspect them before
-training. Register to access the dataset and check the license shown on the
-download page before using or redistributing it.
+Bengaluru, and nearby areas, with Indian-road labels including auto-rickshaws.
+It is not nationwide, and its published annotations are segmentation labels,
+not the YOLO bounding boxes expected by this pipeline. Create or convert
+instance-level boxes and inspect them before training. Register to access the
+dataset and check the license shown on the download page before using or
+redistributing it.
 
 For wider coverage, add images and video frames collected or licensed from
 different states, cities, road types, cameras, and conditions (day/night,
@@ -86,9 +87,9 @@ than real-world performance. The optional `--group-csv` argument below keeps
 each named group in exactly one split. Use a capture-session ID for sequence
 leakage checks; use location groups for a separate evaluation of performance
 in unseen locations. Group-based split sizes are approximate, especially when
-groups have very different numbers of images. Include enough examples of each
-target class, including tractors, rather than relying on overall image count
-alone.
+groups have very different numbers of images. Include enough examples of less
+common classes, especially tractors and e-rickshaws, rather than relying on
+overall image count alone.
 
 Start with this consistent target label order:
 
@@ -96,7 +97,10 @@ Start with this consistent target label order:
 2. `motorcycle`
 3. `bus`
 4. `truck`
-5. `tractor`
+5. `bicycle`
+6. `auto_rickshaw`
+7. `tractor`
+8. `e_rickshaw`
 
 Every source's annotations must be mapped to these same IDs before combining
 datasets. Do not map ambiguous or missing labels to a target class. This
@@ -113,7 +117,7 @@ terms, then annotate bounding boxes in YOLO detection format. Keep image and
 label paths aligned under `images/` and `labels/`; each image needs a matching
 `.txt` file (an empty label file represents a negative image). Label values
 must be `class_id x_center y_center width height`, with normalized coordinates.
-Class IDs follow the order supplied to the preparation command. For the five
+Class IDs follow the order supplied to the preparation command. For the eight
 vehicle classes above, use:
 
 For example, given `datasets/source/images/` and `datasets/source/labels/`:
@@ -122,7 +126,7 @@ For example, given `datasets/source/images/` and `datasets/source/labels/`:
 .\.venv\Scripts\python.exe scripts/prepare_dataset.py `
   --source datasets/source `
   --output datasets/traffic `
-  --classes car motorcycle bus truck tractor
+  --classes car motorcycle bus truck bicycle auto_rickshaw tractor e_rickshaw
 ```
 
 For group-aware evaluation, create `datasets/source/groups.csv` with one row
