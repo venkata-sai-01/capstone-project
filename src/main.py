@@ -310,6 +310,10 @@ FLEET_SPECS: Dict[str, List[Dict[str, str]]] = {
     "lorry": [
         {"make": "Tata Motors", "model": "Prima 3530.K Tipper", "fuel": "Diesel", "class": "Heavy Goods Vehicle"},
         {"make": "Ashok Leyland", "model": "Ecomet 1615 HE", "fuel": "Diesel", "class": "Medium Goods Vehicle"}
+    ],
+    "tractor": [
+        {"make": "Mahindra", "model": "575 DI", "fuel": "Diesel", "class": "Agricultural Tractor"},
+        {"make": "John Deere", "model": "5050 D", "fuel": "Diesel", "class": "Agricultural Tractor"}
     ]
 }
 
@@ -1841,10 +1845,10 @@ class APPoliceRadarSafetyEngine:
         "van": "car",
         "motorcycle": "bike",
         "motorbike": "bike",
-        "bicycle": "bike",
         "bus": "bus",
         "truck": "lorry",
         "lorry": "lorry",
+        "tractor": "tractor",
     }
     ANIMAL_CLASSES = {
         "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe"
