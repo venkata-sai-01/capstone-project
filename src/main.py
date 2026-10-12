@@ -11,25 +11,20 @@ import random
 import re
 import sqlite3
 import shutil
-import subprocess
-import sys
 import threading
 import time
 import uuid
 from collections import deque
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager
 from datetime import datetime
 from fractions import Fraction
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple, TypedDict, Union
+from urllib.parse import unquote, urlparse
 
 import aiohttp
 import cv2
 import numpy as np
-import torch
-import torchvision.models as models
-import torchvision.transforms as transforms
 import uvicorn
-from PIL import Image
 from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaRelay
 from av import VideoFrame
@@ -37,7 +32,10 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from scipy.optimize import minimize
-from ultralytics import YOLO
+if __package__:
+    from src.onnx_detector import ONNXObjectDetector
+else:
+    from onnx_detector import ONNXObjectDetector
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -47,7 +45,7 @@ VIDEO_UPLOAD_DIR = os.path.join(UPLOADS_DIR, "videos")
 CITIZEN_UPLOAD_DIR = os.path.join(UPLOADS_DIR, "citizen_uploads")
 EVIDENCE_DIR = os.path.join(PROJECT_ROOT, "evidence", "violations")
 CSV_LOG_FILE = os.path.join(DATA_DIR, "traffic_violations_log.csv")
-DEFAULT_MODEL_PATH = os.path.join(PROJECT_ROOT, "assets", "models", "yolov8n.pt")
+DEFAULT_MODEL_PATH = os.path.join(PROJECT_ROOT, "assets", "models", "yolov8n.onnx")
 
 
 def _project_path(path: str) -> str:
@@ -77,27 +75,11 @@ def _load_local_environment() -> None:
 _load_local_environment()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 if "REPLACE_WITH_APP_PASSWORD" in DATABASE_URL:
-    setup_script = os.path.join(PROJECT_ROOT, "configure_postgres.py")
-    if __name__ == "__main__" and os.path.isfile(setup_script):
-        print(
-            "PostgreSQL still has the sample password. Complete the hidden password "
-            "prompts below to configure and verify the local app credentials."
-        )
-        setup_result = subprocess.run([sys.executable, setup_script], check=False)
-        if setup_result.returncode != 0:
-            raise SystemExit(
-                "PostgreSQL setup did not complete. Correct the prompted value(s) and "
-                "run this command again."
-            )
-        os.environ.pop("DATABASE_URL", None)
-        _load_local_environment()
-        DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-    if "REPLACE_WITH_APP_PASSWORD" in DATABASE_URL:
-        raise RuntimeError(
-            "DATABASE_URL still contains the example password. Run this script directly "
-            "in a terminal so it can prompt for credentials, or run "
-            "'python configure_postgres.py' first."
-        )
+    raise RuntimeError(
+        "DATABASE_URL still contains a sample password. Run "
+        "'python scripts/configure_postgres.py' from a terminal, or replace the "
+        "sample connection string in .env with valid PostgreSQL credentials."
+    )
 SQLITE_DATABASE_DIR = _project_path(os.environ.get("SQLITE_DATABASE_DIR", "data").strip() or "data")
 DASHBOARD_API_URL = os.environ.get("DASHBOARD_API_URL", "").strip().rstrip("/")
 DASHBOARD_UI_URL = os.environ.get("DASHBOARD_UI_URL", "http://127.0.0.1:8080").strip().rstrip("/")
@@ -159,25 +141,23 @@ def _connect_database(db_file: str) -> _DatabaseConnection:
                 "For SQLite, leave DATABASE_URL unset and optionally set SQLITE_DATABASE_DIR."
             )
         try:
-            psycopg = importlib.import_module("psycopg")
+            postgres_driver = importlib.import_module("pg8000.dbapi")
         except ModuleNotFoundError as exc:
-            if exc.name != "psycopg":
+            if exc.name != "pg8000":
                 raise
             raise RuntimeError(
-                "DATABASE_URL is set, but psycopg is not installed. Install it with "
-                "'pip install \"psycopg[binary]\"'."
+                "DATABASE_URL is set, but pg8000 is not installed. Install project "
+                "dependencies with 'pip install -r requirements.txt'."
             ) from exc
-        try:
-            connection = psycopg.connect(DATABASE_URL)
-        except psycopg.OperationalError as exc:
-            if getattr(exc, "sqlstate", None) == "28P01":
-                raise RuntimeError(
-                    "PostgreSQL rejected the DATABASE_URL password for traffic_app. "
-                    "Run 'python configure_postgres.py' from a terminal and enter the "
-                    "correct local PostgreSQL administrator password to reset and verify "
-                    "the app credentials."
-                ) from exc
-            raise
+        parsed_url = urlparse(DATABASE_URL)
+        connection = postgres_driver.connect(
+            host=parsed_url.hostname or "localhost",
+            port=parsed_url.port or 5432,
+            database=unquote(parsed_url.path.lstrip("/")),
+            user=unquote(parsed_url.username or ""),
+            password=unquote(parsed_url.password or ""),
+            timeout=10,
+        )
         return _DatabaseConnection(connection, is_postgres=True)
 
     sqlite_path = os.path.abspath(os.path.join(SQLITE_DATABASE_DIR or ".", db_file))
@@ -399,38 +379,7 @@ class CitizenSafetyReport(TypedDict):
 
 
 # ===========================================================================
-# 3. Hardware & Edge Optimization Engine
-# ===========================================================================
-
-class EdgeHardwareOptimizer:
-    """Manages PyTorch CUDA caching, FP16 Automatic Mixed Precision, and hardware acceleration hooks."""
-
-    def __init__(self):
-        self.device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-        self.use_amp: bool = (self.device == "cuda")
-        if self.device == "cpu":
-            torch.set_num_threads(max(1, min(4, (os.cpu_count() or 2) // 2)))
-        self.scaler: torch.amp.GradScaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
-        print(f"[HardwareOptimizer] Execution Device: {self.device.upper()} | FP16 AMP: {self.use_amp}")
-
-    def clean_cache(self):
-        if self.device == "cuda":
-            torch.cuda.empty_cache()
-
-    @contextmanager
-    def autocast_context(self):
-        if self.use_amp:
-            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-                yield
-        else:
-            yield
-
-
-hardware_optimizer = EdgeHardwareOptimizer()
-
-
-# ===========================================================================
-# 4. Environmental Adaptivity & Dynamic ROI Masker
+# 3. Environmental Adaptivity & Dynamic ROI Masker
 # ===========================================================================
 
 class EnvironmentalAdaptivityEngine:
@@ -476,64 +425,6 @@ class DynamicROIMasker:
         if self.polygon_roi is None:
             return frame
         return cv2.bitwise_and(frame, frame, mask=self.mask)
-
-
-# ===========================================================================
-# 5. Pedestrian Attribute & Gender Classification Engine
-# ===========================================================================
-
-class PedestrianAttributeClassifier:
-    """Classifies gender (Male / Female) and attributes on cropped pedestrian bounding boxes."""
-
-    def __init__(self, model_path: Optional[str] = None, device: str = "cpu"):
-        self.device = device
-        self.classes: List[str] = ["Female", "Male"]
-        self.transform = transforms.Compose([
-            transforms.Resize((128, 128)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
-
-        if model_path and os.path.exists(model_path):
-            loaded_model = torch.load(model_path, map_location=self.device)
-            self.model = loaded_model if isinstance(loaded_model, torch.nn.Module) else models.mobilenet_v3_small(
-                weights=models.MobileNet_V3_Small_Weights.DEFAULT
-            )
-        else:
-            self.model = models.mobilenet_v3_small(weights=models.MobileNet_V3_Small_Weights.DEFAULT)
-
-        classifier = getattr(self.model, "classifier", None)
-        if isinstance(classifier, torch.nn.Sequential) and len(classifier) > 3:
-            final_layer = classifier[3]
-            if isinstance(final_layer, torch.nn.Linear):
-                in_features = final_layer.in_features
-                classifier[3] = torch.nn.Linear(in_features, 2)
-
-        self.model.to(self.device)
-        self.model.eval()
-
-    def predict_gender(self, crop_bgr: np.ndarray) -> Tuple[str, float]:
-        if crop_bgr is None or crop_bgr.size == 0 or crop_bgr.shape[0] < 20 or crop_bgr.shape[1] < 20:
-            return "Person", 0.50
-
-        try:
-            rgb_img = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
-            pil_img = Image.fromarray(np.ascontiguousarray(rgb_img, dtype=np.uint8))
-            tensor = self.transform(pil_img)
-            tensor = tensor.unsqueeze(0).to(self.device)
-
-            with torch.no_grad():
-                with hardware_optimizer.autocast_context():
-                    logits = self.model(tensor)
-                    probs = torch.softmax(logits, dim=1)[0]
-                    conf, pred_idx = torch.max(probs, dim=0)
-
-            predicted_idx = int(pred_idx.item())
-            gender_str = str(self.classes[predicted_idx])
-            conf_val = float(round(conf.item(), 2))
-            return gender_str, conf_val
-        except (ValueError, TypeError, RuntimeError):
-            return "Person", 0.50
 
 
 # ===========================================================================
@@ -1227,6 +1118,11 @@ class TimeSeriesMetricsLogger:
                 "CREATE INDEX IF NOT EXISTS idx_telemetry_track_timestamp "
                 "ON highway_telemetry(track_id, timestamp_ms);"
             )
+            if DATABASE_URL:
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_telemetry_unique_point "
+                    "ON highway_telemetry(timestamp_ms, track_id, plate, speed_kmh, lane_id, status);"
+                )
             self.conn.commit()
 
     def log_point(self, track_id: int, plate: str, speed_kmh: float, lane_id: int = 1, status: str = "OK"):
@@ -1235,7 +1131,8 @@ class TimeSeriesMetricsLogger:
             cur = self.conn.cursor()
             # language=sqlite
             cur.execute(
-                "INSERT INTO highway_telemetry VALUES (?, ?, ?, ?, ?, ?);",
+                "INSERT INTO highway_telemetry VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT DO NOTHING;",
                 (now_ms, track_id, plate, speed_kmh, lane_id, status)
             )
             self.conn.commit()
@@ -1864,16 +1761,13 @@ class APPoliceRadarSafetyEngine:
 
     def __init__(self, grabber: DynamicTrafficGrabber, model_path: str = DEFAULT_MODEL_PATH):
         self.grabber = grabber
-        self.device = hardware_optimizer.device
-        self.model = YOLO(model_path)
-        if self.device == "cuda":
-            self.model.to("cuda")
+        self.device = "cpu"
+        self.model = ONNXObjectDetector(model_path)
 
         self.incident_detector = VelocityCollisionIncidentDetector()
         self.adaptivity_engine = EnvironmentalAdaptivityEngine()
         self.roi_masker = DynamicROIMasker(width=1280, height=720)
 
-        self.person_attributes: Dict[int, Tuple[str, float]] = {}
         self.conf_threshold: float = 0.30
         self.speed_limit_kmh: float = 60.0
         self.calibration_distance_m: float = 20.0
@@ -1939,6 +1833,7 @@ class APPoliceRadarSafetyEngine:
         self._init_csv()
 
     def _init_csv(self):
+        os.makedirs(os.path.dirname(self.csv_log_file), exist_ok=True)
         if not os.path.exists(self.csv_log_file):
             with open(self.csv_log_file, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
@@ -1948,6 +1843,34 @@ class APPoliceRadarSafetyEngine:
                     "FASTag_ID", "Recorded_Speed_KMH", "Speed_Limit_KMH", "Statutory_Section",
                     "Telugu_Notice", "Fine_Amount_INR", "CCTNS_Status", "Digital_Signature", "Snapshot_Path"
                 ])
+        if DATABASE_URL:
+            conn = _connect_database("traffic_registry.db")
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS traffic_violations (
+                    timestamp TEXT,
+                    challan_no TEXT PRIMARY KEY,
+                    license_plate TEXT,
+                    owner_name TEXT,
+                    driving_license TEXT,
+                    vehicle_class TEXT,
+                    district TEXT,
+                    dto_office TEXT,
+                    make_model TEXT,
+                    fuel_type TEXT,
+                    fastag_id TEXT,
+                    recorded_speed_kmh DOUBLE PRECISION,
+                    speed_limit_kmh INTEGER,
+                    statutory_section TEXT,
+                    telugu_notice TEXT,
+                    fine_amount_inr INTEGER,
+                    cctns_status TEXT,
+                    digital_signature TEXT,
+                    snapshot_path TEXT
+                )
+            """)
+            conn.commit()
+            conn.close()
 
     def start(self):
         self.running = True
@@ -2072,15 +1995,30 @@ class APPoliceRadarSafetyEngine:
         cv2.rectangle(citation_frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
         cv2.imwrite(snapshot_filename, citation_frame)
 
+        violation_row = [
+            timestamp_full, challan_no, plate, vahan_data["owner_name"], vahan_data["dl_number"],
+            vahan_data["veh_class"], district_str, vahan_data["dto_office"], vahan_data["make_model"],
+            vahan_data["fuel_type"], vahan_data["fastag_id"], round(speed, 1), int(self.speed_limit_kmh),
+            sec_data["section"], telugu_sms, fine_amount, cctns_hit["severity"] if cctns_hit else "CLEAR",
+            rto_payload.get("digital_signature", "DIGITALLY_SIGNED"), snapshot_filename
+        ]
+        if DATABASE_URL:
+            conn = _connect_database("traffic_registry.db")
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO traffic_violations VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ) ON CONFLICT(challan_no) DO NOTHING
+                """,
+                tuple(violation_row),
+            )
+            conn.commit()
+            conn.close()
+
         with open(self.csv_log_file, "a", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow([
-                timestamp_full, challan_no, plate, vahan_data["owner_name"], vahan_data["dl_number"],
-                vahan_data["veh_class"], district_str, vahan_data["dto_office"], vahan_data["make_model"],
-                vahan_data["fuel_type"], vahan_data["fastag_id"], round(speed, 1), int(self.speed_limit_kmh),
-                sec_data["section"], telugu_sms, fine_amount, cctns_hit["severity"] if cctns_hit else "CLEAR",
-                rto_payload.get("digital_signature", "DIGITALLY_SIGNED"), snapshot_filename
-            ])
+            writer.writerow(violation_row)
 
         event: Dict[str, Any] = {
             "timestamp": datetime.now().strftime("%H:%M:%S"),
@@ -2105,7 +2043,7 @@ class APPoliceRadarSafetyEngine:
     def _inference_worker(self):
         fps_tracker = 0
         last_time = time.perf_counter()
-        minimum_frame_interval = 0.2 if self.device == "cpu" else 0.0
+        minimum_frame_interval = 0.2
 
         while self.running:
             raw_bgr = self.grabber.get_frame(timeout=0.03)
@@ -2126,15 +2064,9 @@ class APPoliceRadarSafetyEngine:
             enhanced_bgr = self.adaptivity_engine.enhance_frame(raw_bgr, apply_clahe=True, gamma=1.05)
             masked_input = self.roi_masker.apply(enhanced_bgr)
 
-            with hardware_optimizer.autocast_context():
-                model_results = self.model.track(
-                    masked_input,
-                    persist=True,
-                    verbose=False,
-                    conf=conf,
-                    device=self.device
-                )
-            result_list = list(model_results) if model_results is not None else []
+            boxes, track_ids, class_ids, confidences, model_names = self.model.infer(
+                masked_input, conf
+            )
 
             annotated_frame = raw_bgr.copy()
             h, w, _ = annotated_frame.shape
@@ -2161,24 +2093,7 @@ class APPoliceRadarSafetyEngine:
             boxes_dict: Dict[int, np.ndarray] = {}
             lane_assignments: Dict[int, int] = {}
 
-            boxes: np.ndarray = np.empty((0, 4), dtype=int)
-            track_ids: np.ndarray = np.empty((0,), dtype=int)
-            class_ids: np.ndarray = np.empty((0,), dtype=int)
-            confidences: np.ndarray = np.empty((0,), dtype=float)
-            model_names: Any = self.model.names
-
-            if result_list and len(result_list) > 0 and result_list[0].boxes is not None and result_list[0].boxes.xyxy is not None:
-                boxes = result_list[0].boxes.xyxy.cpu().numpy().astype(int)
-                model_names = getattr(result_list[0], "names", model_names)
-                track_ids = (
-                    result_list[0].boxes.id.cpu().numpy().astype(int)
-                    if result_list[0].boxes.id is not None
-                    else np.arange(len(boxes))
-                )
-                class_ids = result_list[0].boxes.cls.cpu().numpy().astype(int)
-                if result_list[0].boxes.conf is not None:
-                    confidences = result_list[0].boxes.conf.cpu().numpy()
-            elif not self.grabber.has_source:
+            if not len(boxes) and not self.grabber.has_source:
                 v_boxes = [[int(v["x"]), int(v["y"]), int(v["x"]) + 90, int(v["y"]) + 140] for v in
                            self.grabber.sim_vehicles]
                 p_boxes = [[int(p["x"]), int(p["y"]), int(p["x"]) + 40, int(p["y"]) + 60] for p in
@@ -2483,7 +2398,7 @@ peer_connections: Set[RTCPeerConnection] = set()
 active_websocket_clients: Set[WebSocket] = set()
 master_track: Optional[WebRTCVideoStreamTrack] = None
 VIDEO_SRC: Union[int, str] = 0
-MODEL_PATH: str = _project_path(os.environ.get("YOLO_MODEL_PATH", "assets/models/yolov8n.pt"))
+MODEL_PATH: str = _project_path(os.environ.get("YOLO_MODEL_PATH", "assets/models/yolov8n.onnx"))
 
 os.makedirs(VIDEO_UPLOAD_DIR, exist_ok=True)
 os.makedirs(CITIZEN_UPLOAD_DIR, exist_ok=True)
@@ -4703,7 +4618,7 @@ if __name__ == "__main__":
         ))
     parser.add_argument("--source", type=str, default="0",
                         help="Video source: camera index (0), RTSP URL, or file path")
-    parser.add_argument("--model", type=str, default=DEFAULT_MODEL_PATH, help="YOLO model path")
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL_PATH, help="YOLOv8 ONNX model path")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host IP address")
     parser.add_argument("--port", type=int, default=8000, help="REST API port")
     parser.add_argument("--dashboard-port", type=int, default=8080, help="Dashboard web port")

@@ -9,6 +9,7 @@ data/*.db
 data/*.db-*
 data/traffic_violations_log.csv
 assets/models/*.pt
+assets/models/*.onnx
 uploads/*
 !uploads/.gitkeep
 !uploads/citizen_uploads/

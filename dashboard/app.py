@@ -1,10 +1,15 @@
 import csv
+import io
 import math
+import os
 import sqlite3
 from collections import deque
 from contextlib import closing
 from pathlib import Path
+from typing import Any
+from urllib.parse import unquote, urlparse
 
+import pg8000.dbapi
 import streamlit as st
 
 
@@ -20,8 +25,68 @@ CSV_FILE = DATA_DIR / "traffic_violations_log.csv"
 MAX_ROWS = 1000
 
 
+def load_database_url() -> str:
+    env_path = PROJECT_DIR / ".env"
+    if env_path.is_file():
+        with env_path.open(encoding="utf-8") as env_file:
+            for line_number, line in enumerate(env_file, start=1):
+                entry = line.strip()
+                if not entry or entry.startswith("#"):
+                    continue
+                key, separator, value = entry.partition("=")
+                if not separator or not key.strip() or not value.strip():
+                    raise ValueError(f"Invalid .env entry on line {line_number}.")
+                value = value.strip()
+                if value[:1] in {"'", '"'} and value[-1:] == value[:1]:
+                    value = value[1:-1]
+                os.environ.setdefault(key.strip(), value)
+    return os.environ.get("DATABASE_URL", "").strip()
+
+
+DATABASE_URL = load_database_url()
+
+
+def postgres_connection_options() -> dict[str, Any]:
+    parsed_url = urlparse(DATABASE_URL)
+    return {
+        "host": parsed_url.hostname or "localhost",
+        "port": parsed_url.port or 5432,
+        "database": unquote(parsed_url.path.lstrip("/")),
+        "user": unquote(parsed_url.username or ""),
+        "password": unquote(parsed_url.password or ""),
+        "timeout": 10,
+    }
+
+
 @st.cache_data(ttl=30)
 def read_table(database: str, table: str) -> tuple[list[str], list[dict], int]:
+    if DATABASE_URL:
+        if TABLES.get(database) != table:
+            raise ValueError(f"Unsupported database table: {database}/{table}")
+        try:
+            with closing(pg8000.dbapi.connect(**postgres_connection_options())) as connection:
+                cursor = connection.cursor()
+                try:
+                    cursor.execute(
+                        f'SELECT * FROM "{table}" LIMIT %s', (MAX_ROWS,)
+                    )
+                    raw_rows = cursor.fetchall()
+                    columns = (
+                        [description[0] for description in cursor.description]
+                        if cursor.description
+                        else []
+                    )
+                    cursor.execute(f'SELECT COUNT(*) FROM "{table}"')
+                    count_row = cursor.fetchone()
+                    total = int(count_row[0]) if count_row else 0
+                finally:
+                    cursor.close()
+        except pg8000.dbapi.DatabaseError as exc:
+            raise RuntimeError(
+                f"Could not read {table} from PostgreSQL: {exc}"
+            ) from exc
+        return columns, [dict(zip(columns, row)) for row in raw_rows], total
+
     path = DATA_DIR / database
     if not path.is_file():
         raise FileNotFoundError(f"Database file not found: {path}")
@@ -46,6 +111,33 @@ def read_table(database: str, table: str) -> tuple[list[str], list[dict], int]:
 
 @st.cache_data(ttl=30)
 def read_violations() -> tuple[list[str], list[dict], int]:
+    if DATABASE_URL:
+        try:
+            with closing(pg8000.dbapi.connect(**postgres_connection_options())) as connection:
+                cursor = connection.cursor()
+                try:
+                    cursor.execute(
+                        "SELECT * FROM traffic_violations "
+                        "ORDER BY timestamp DESC LIMIT %s",
+                        (MAX_ROWS,),
+                    )
+                    raw_rows = cursor.fetchall()
+                    columns = (
+                        [description[0] for description in cursor.description]
+                        if cursor.description
+                        else []
+                    )
+                    cursor.execute("SELECT COUNT(*) FROM traffic_violations")
+                    count_row = cursor.fetchone()
+                    total = int(count_row[0]) if count_row else 0
+                finally:
+                    cursor.close()
+        except pg8000.dbapi.DatabaseError as exc:
+            raise RuntimeError(
+                f"Could not read traffic violations from PostgreSQL: {exc}"
+            ) from exc
+        return columns, [dict(zip(columns, row)) for row in raw_rows], total
+
     if not CSV_FILE.is_file():
         raise FileNotFoundError(f"Violation log not found: {CSV_FILE}")
     try:
@@ -75,6 +167,14 @@ def show_records(
         width="stretch",
         alt=alt_text,
     )
+
+
+def violations_csv(columns: list[str], rows: list[dict]) -> bytes:
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=columns)
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8-sig")
 
 
 def show_database_table(
@@ -110,7 +210,8 @@ def load_counts() -> dict[str, int]:
 
 def render_overview() -> None:
     st.header("System overview")
-    st.caption("A read-only view of the local traffic and citizen-safety records.")
+    backend = "PostgreSQL" if DATABASE_URL else "local SQLite"
+    st.caption(f"A read-only view of traffic and citizen-safety records in {backend}.")
     counts = load_counts()
 
     first_row = st.columns(3)
@@ -130,7 +231,7 @@ def render_overview() -> None:
     else:
         show_records(
             columns,
-            rows[-10:],
+            sorted(rows, key=lambda row: row.get("timestamp", ""), reverse=True)[:10],
             "No violation records are available yet.",
             "Recent traffic violation records",
         )
@@ -138,7 +239,10 @@ def render_overview() -> None:
 
 def render_violations() -> None:
     st.header("Traffic violations")
-    st.caption(f"Showing up to {MAX_ROWS:,} records from the local CSV log.")
+    st.caption(
+        f"Showing up to {MAX_ROWS:,} records from "
+        f"{'PostgreSQL' if DATABASE_URL else 'the local CSV log'}."
+    )
     try:
         columns, rows, _ = read_violations()
     except (FileNotFoundError, RuntimeError) as exc:
@@ -150,9 +254,13 @@ def render_violations() -> None:
     show_records(columns, rows, "The violation log is empty.", "Traffic violation log")
     if rows:
         st.download_button(
-            "Download full violation CSV",
-            data=CSV_FILE.read_bytes(),
-            file_name=CSV_FILE.name,
+            "Download displayed violation records as CSV",
+            data=(
+                violations_csv(columns, rows)
+                if DATABASE_URL
+                else CSV_FILE.read_bytes()
+            ),
+            file_name="traffic_violations.csv",
             mime="text/csv",
         )
 
@@ -252,7 +360,11 @@ def main() -> None:
         "Challan blockchain": render_blockchain,
     }
     renderers[page]()
-    st.sidebar.caption("Reads local files from the project directory.")
+    st.sidebar.caption(
+        "Reads from PostgreSQL and local evidence files."
+        if DATABASE_URL
+        else "Reads local files from the project directory."
+    )
 
 
 if __name__ == "__main__":
