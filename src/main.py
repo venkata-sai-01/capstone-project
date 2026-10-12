@@ -4657,7 +4657,7 @@ if __name__ == "__main__":
     print(" Accident Predict:  ACTIVE (TTC Forecasting, Weaving & Tailgating Detection)")
     print(" Citizen Portal:    ACTIVE (Crowdsourced Hazards & Emergency SOS)")
     print(" Green Corridor:    ACTIVE (Emergency Vehicle Priority Preemption EVPP)")
-    print(" Weather Engine:    ACTIVE (Visibility & Contrast-Adaptive Speed Limiter)")
+    print(" Weather Engine:    ACTIVE (Visibility & Contrast-Adaptive Speed Limiter)    ")
     print(" Carbon Audit:      ACTIVE (Fleet Emission Footprint & PUC Compliance)")
     print(" HSRP Audit:        ACTIVE (MoRTH Indian Standard Plate Verification)")
     print(" Quantum QAOA:      ACTIVE (Corridor Congestion & Patrol Placement Optimization)")
