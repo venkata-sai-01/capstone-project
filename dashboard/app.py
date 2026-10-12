@@ -1,26 +1,14 @@
 import csv
-import importlib
 import math
-import os
 import sqlite3
 from collections import deque
 from contextlib import closing
 from pathlib import Path
 
 import streamlit as st
-from streamlit.errors import StreamlitSecretNotFoundError
-
-from src.config import load_local_environment
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
-load_local_environment(PROJECT_DIR)
-DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-if not DATABASE_URL:
-    try:
-        DATABASE_URL = str(st.secrets.get("DATABASE_URL", "")).strip()
-    except StreamlitSecretNotFoundError:
-        pass
 DATA_DIR = PROJECT_DIR / "data"
 TABLES = {
     "challan_blockchain.db": "blockchain_blocks",
@@ -34,41 +22,25 @@ MAX_ROWS = 1000
 
 @st.cache_data(ttl=30)
 def read_table(database: str, table: str) -> tuple[list[str], list[dict], int]:
+    path = DATA_DIR / database
+    if not path.is_file():
+        raise FileNotFoundError(f"Database file not found: {path}")
+
     try:
-        if DATABASE_URL:
-            psycopg = importlib.import_module("psycopg")
-            try:
-                with closing(psycopg.connect(DATABASE_URL)) as connection:
-                    with connection.cursor() as cursor:
-                        cursor.execute(f'SELECT * FROM "{table}" LIMIT %s', (MAX_ROWS,))
-                        columns = [description.name for description in cursor.description or []]
-                        rows = cursor.fetchall()
-                        cursor.execute(f'SELECT COUNT(*) FROM "{table}"')
-                        total = cursor.fetchone()[0]
-            except psycopg.Error as exc:
-                raise RuntimeError(
-                    f"Could not read {table} from the configured PostgreSQL database: {exc}"
-                ) from exc
-        else:
-            path = DATA_DIR / database
-            if not path.is_file():
-                raise FileNotFoundError(f"Database file not found: {path}")
-            with closing(sqlite3.connect(path)) as connection:
-                connection.row_factory = sqlite3.Row
-                with connection:
-                    cursor = connection.execute(
-                        f'SELECT * FROM "{table}" LIMIT ?', (MAX_ROWS,)
-                    )
-                    columns = [description[0] for description in cursor.description or []]
-                    rows = cursor.fetchall()
-                    total = connection.execute(
-                        f'SELECT COUNT(*) FROM "{table}"'
-                    ).fetchone()[0]
-    except (sqlite3.Error, OSError, ImportError) as exc:
+        with closing(sqlite3.connect(path)) as connection:
+            connection.row_factory = sqlite3.Row
+            with connection:
+                cursor = connection.execute(
+                    f'SELECT * FROM "{table}" LIMIT ?', (MAX_ROWS,)
+                )
+                columns = [description[0] for description in cursor.description or []]
+                rows = cursor.fetchall()
+                total = connection.execute(
+                    f'SELECT COUNT(*) FROM "{table}"'
+                ).fetchone()[0]
+    except sqlite3.Error as exc:
         raise RuntimeError(f"Could not read {table} from {database}: {exc}") from exc
 
-    if DATABASE_URL:
-        return columns, [dict(zip(columns, row)) for row in rows], total
     return columns, [dict(row) for row in rows], total
 
 
@@ -280,11 +252,7 @@ def main() -> None:
         "Challan blockchain": render_blockchain,
     }
     renderers[page]()
-    st.sidebar.caption(
-        "Reads from the configured PostgreSQL database."
-        if DATABASE_URL
-        else "Reads local files from the project directory."
-    )
+    st.sidebar.caption("Reads local files from the project directory.")
 
 
 if __name__ == "__main__":

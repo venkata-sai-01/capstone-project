@@ -11,6 +11,8 @@ import random
 import re
 import sqlite3
 import shutil
+import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -18,7 +20,7 @@ from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
 from fractions import Fraction
-from typing import Any, Deque, Dict, List, Optional, Set, Tuple, TypedDict, Union, cast
+from typing import Any, Deque, Dict, List, Optional, Set, Tuple, TypedDict, Union
 
 import aiohttp
 import cv2
@@ -37,11 +39,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from scipy.optimize import minimize
 from ultralytics import YOLO
 
-if __package__:
-    from src.config import load_local_environment
-else:
-    from config import load_local_environment
-
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
@@ -53,23 +50,54 @@ CSV_LOG_FILE = os.path.join(DATA_DIR, "traffic_violations_log.csv")
 DEFAULT_MODEL_PATH = os.path.join(PROJECT_ROOT, "assets", "models", "yolov8n.pt")
 
 
-def _as_numpy_array(value: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
-    if isinstance(value, torch.Tensor):
-        return value.detach().cpu().numpy()
-    return value
-
-
 def _project_path(path: str) -> str:
     return os.path.abspath(os.path.join(PROJECT_ROOT, path))
 
 
-load_local_environment(PROJECT_ROOT)
+def _load_local_environment() -> None:
+    env_path = os.path.join(PROJECT_ROOT, ".env")
+    if not os.path.isfile(env_path):
+        return
+
+    with open(env_path, encoding="utf-8") as env_file:
+        for line_number, line in enumerate(env_file, start=1):
+            entry = line.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            key, separator, value = entry.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if not separator or not key or not value:
+                raise ValueError(f"Invalid .env entry on line {line_number}.")
+            if value[:1] in {"'", '"'} and value[-1:] == value[:1]:
+                value = value[1:-1]
+            os.environ.setdefault(key, value)
+
+
+_load_local_environment()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 if "REPLACE_WITH_APP_PASSWORD" in DATABASE_URL:
-    raise RuntimeError(
-        "DATABASE_URL still contains the example password. Set DATABASE_URL in .env "
-        "to the connection URL for your PostgreSQL database."
-    )
+    setup_script = os.path.join(PROJECT_ROOT, "configure_postgres.py")
+    if __name__ == "__main__" and os.path.isfile(setup_script):
+        print(
+            "PostgreSQL still has the sample password. Complete the hidden password "
+            "prompts below to configure and verify the local app credentials."
+        )
+        setup_result = subprocess.run([sys.executable, setup_script], check=False)
+        if setup_result.returncode != 0:
+            raise SystemExit(
+                "PostgreSQL setup did not complete. Correct the prompted value(s) and "
+                "run this command again."
+            )
+        os.environ.pop("DATABASE_URL", None)
+        _load_local_environment()
+        DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+    if "REPLACE_WITH_APP_PASSWORD" in DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL still contains the example password. Run this script directly "
+            "in a terminal so it can prompt for credentials, or run "
+            "'python configure_postgres.py' first."
+        )
 SQLITE_DATABASE_DIR = _project_path(os.environ.get("SQLITE_DATABASE_DIR", "data").strip() or "data")
 DASHBOARD_API_URL = os.environ.get("DASHBOARD_API_URL", "").strip().rstrip("/")
 DASHBOARD_UI_URL = os.environ.get("DASHBOARD_UI_URL", "http://127.0.0.1:8080").strip().rstrip("/")
@@ -142,10 +170,12 @@ def _connect_database(db_file: str) -> _DatabaseConnection:
         try:
             connection = psycopg.connect(DATABASE_URL)
         except psycopg.OperationalError as exc:
-            if getattr(exc, "sqlstate", None) in {"28P01", "28000"}:
+            if getattr(exc, "sqlstate", None) == "28P01":
                 raise RuntimeError(
-                    "PostgreSQL rejected the credentials in DATABASE_URL. Verify the "
-                    "username, password, database name, and server access settings."
+                    "PostgreSQL rejected the DATABASE_URL password for traffic_app. "
+                    "Run 'python configure_postgres.py' from a terminal and enter the "
+                    "correct local PostgreSQL administrator password to reset and verify "
+                    "the app credentials."
                 ) from exc
             raise
         return _DatabaseConnection(connection, is_postgres=True)
@@ -489,7 +519,7 @@ class PedestrianAttributeClassifier:
         try:
             rgb_img = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
             pil_img = Image.fromarray(np.ascontiguousarray(rgb_img, dtype=np.uint8))
-            tensor = cast(torch.Tensor, self.transform(pil_img))
+            tensor = self.transform(pil_img)
             tensor = tensor.unsqueeze(0).to(self.device)
 
             with torch.no_grad():
@@ -931,16 +961,9 @@ class APCCTNSHotlistDatabase:
                               "action": "BROADCAST_ALL_PATROLS"}
         }
 
-    @staticmethod
-    def _normalize_plate(plate: str) -> str:
-        return re.sub(r"[\s\-]", "", str(plate or "")).upper()
-
     def check_hotlist(self, plate: str) -> Optional[Dict[str, str]]:
-        clean = self._normalize_plate(plate)
-        for known_plate, details in self.blacklist_plates.items():
-            if self._normalize_plate(known_plate) == clean:
-                return details
-        return None
+        clean = plate.strip().upper()
+        return self.blacklist_plates.get(clean, None)
 
 
 class APRTOIntegrationGateway:
@@ -1090,20 +1113,13 @@ class APVehicleRegistryEngine:
             "reg_date": str(row[13])
         }
 
-    @staticmethod
-    def _normalize_plate(plate: str) -> str:
-        return re.sub(r"[\s\-]", "", str(plate or "")).upper()
-
     def resolve_plate_to_profile(self, raw_plate: str, v_type: str = "car") -> Dict[str, Any]:
-        clean_plate = self._normalize_plate(raw_plate)
+        clean_plate = raw_plate.upper().replace(" ", "").replace("-", "")
 
         with self.lock:
             cur = self.conn.cursor()
             # language=sqlite
-            cur.execute(
-                "SELECT * FROM vahan_registry WHERE UPPER(REPLACE(REPLACE(plate, ' ', ''), '-', '')) = ?",
-                (clean_plate,)
-            )
+            cur.execute("SELECT * FROM vahan_registry WHERE plate = ?", (raw_plate,))
             row = cur.fetchone()
             self.conn.commit()
             if row:
@@ -1139,10 +1155,6 @@ class APVehicleRegistryEngine:
             "reg_date": f"{rng.randint(2017, 2024):04d}-{rng.randint(1, 12):02d}-{rng.randint(1, 28):02d}"
         }
 
-        canonical_plate = self._normalize_plate(raw_plate)
-        canonical_profile = dict(profile)
-        canonical_profile["plate"] = canonical_plate
-
         with self.lock:
             cur = self.conn.cursor()
             # language=sqlite
@@ -1157,14 +1169,14 @@ class APVehicleRegistryEngine:
                     insurance_status=excluded.insurance_status, puc_status=excluded.puc_status,
                     reg_date=excluded.reg_date;
             """, (
-                canonical_plate, canonical_profile["owner_name"], canonical_profile["dl_number"], canonical_profile["district"],
-                canonical_profile["dto_office"], canonical_profile["region"], canonical_profile["pin_code"], canonical_profile["make_model"],
-                canonical_profile["veh_class"], canonical_profile["fuel_type"], canonical_profile["fastag_id"],
-                canonical_profile["insurance_status"], canonical_profile["puc_status"], canonical_profile["reg_date"]
+                profile["plate"], profile["owner_name"], profile["dl_number"], profile["district"],
+                profile["dto_office"], profile["region"], profile["pin_code"], profile["make_model"],
+                profile["veh_class"], profile["fuel_type"], profile["fastag_id"],
+                profile["insurance_status"], profile["puc_status"], profile["reg_date"]
             ))
             self.conn.commit()
 
-        return canonical_profile
+        return profile
 
     def search_records(self, query: str) -> List[Dict[str, Any]]:
         q = query.strip().upper()
@@ -2156,16 +2168,16 @@ class APPoliceRadarSafetyEngine:
             model_names: Any = self.model.names
 
             if result_list and len(result_list) > 0 and result_list[0].boxes is not None and result_list[0].boxes.xyxy is not None:
-                boxes = _as_numpy_array(result_list[0].boxes.xyxy).astype(int)
+                boxes = result_list[0].boxes.xyxy.cpu().numpy().astype(int)
                 model_names = getattr(result_list[0], "names", model_names)
                 track_ids = (
-                    _as_numpy_array(result_list[0].boxes.id).astype(int)
+                    result_list[0].boxes.id.cpu().numpy().astype(int)
                     if result_list[0].boxes.id is not None
                     else np.arange(len(boxes))
                 )
-                class_ids = _as_numpy_array(result_list[0].boxes.cls).astype(int)
+                class_ids = result_list[0].boxes.cls.cpu().numpy().astype(int)
                 if result_list[0].boxes.conf is not None:
-                    confidences = _as_numpy_array(result_list[0].boxes.conf)
+                    confidences = result_list[0].boxes.conf.cpu().numpy()
             elif not self.grabber.has_source:
                 v_boxes = [[int(v["x"]), int(v["y"]), int(v["x"]) + 90, int(v["y"]) + 140] for v in
                            self.grabber.sim_vehicles]
