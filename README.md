@@ -48,26 +48,63 @@ viewer use PostgreSQL; new violation records are written to PostgreSQL as well
 as the local CSV. Video files, ONNX model weights, and evidence images remain
 on disk rather than being stored as large database blobs.
 
-## Configure the ONNX detector
+## Configure the YOLO ONNX detector
 
-The traffic pipeline uses ONNX Runtime and expects a YOLOv8 detection model at
-`assets/models/yolov8n.onnx` by default. The default model is the COCO-trained
-YOLOv8 nano model. For frames larger than the model input, the detector runs a
-full-frame pass plus overlapping crop passes and merges their results with
-class-aware NMS; this can recover smaller, distant objects at the cost of
-inference speed. Model files are not included in Git.
-Provide a compatible ONNX export and set `YOLO_MODEL_PATH` in `.env` if it is
-stored elsewhere. The detector expects an NCHW RGB input and a standard YOLOv8
-detection output. The previous PyTorch `.pt` checkpoint cannot be loaded
-directly by this runtime. If you have the `.pt` checkpoint, export it on a
-machine where PyTorch and Ultralytics are permitted:
+The traffic pipeline uses ONNX Runtime and defaults to the existing COCO-trained
+YOLOv8 nano model at `assets/models/yolov8n.onnx` for backward compatibility.
+It also accepts compatible exports from newer Ultralytics models, including
+YOLO26. For frames larger than the model input, the detector runs a full-frame
+pass plus overlapping crop passes and merges their results with class-aware
+NMS; this can recover smaller, distant objects at the cost of inference speed.
+Model files are not included in Git.
+
+To use the latest YOLO26 nano detection model, install the current Ultralytics
+package in an environment with PyTorch, export the model to ONNX, then set
+`YOLO_MODEL_PATH=assets/models/yolo26n.onnx` in `.env`:
 
 ```powershell
-python -c "from ultralytics import YOLO; YOLO('assets/models/yolov8n.pt').export(format='onnx', imgsz=640)"
+python -m pip install --upgrade ultralytics
+python -c "from ultralytics import YOLO; YOLO('yolo26n.pt').export(format='onnx', imgsz=640)"
 ```
 
-This writes `assets/models/yolov8n.onnx`. The application itself uses ONNX
-Runtime and does not require PyTorch or Ultralytics.
+The export writes `yolo26n.onnx` beside the checkpoint (normally in the current
+working directory); move it to `assets/models/yolo26n.onnx` or set
+`YOLO_MODEL_PATH` to its actual location. The runtime expects NCHW RGB input
+and supports standard YOLO detection tensors as well as end-to-end
+`xyxy, confidence, class` output rows. PyTorch and Ultralytics are needed only
+to obtain/export weights; the application itself continues to use ONNX Runtime.
+
+## Evaluate and compare YOLO models
+
+Prepare a labeled evaluation split using standard YOLO detection labels: keep
+the image and label trees mirrored, with one `.txt` file per image and rows in
+`class_id x_center y_center width height` normalized to `[0, 1]`. Use an empty
+label file for a negative image. For example:
+
+```text
+datasets/traffic/images/val/highway/frame001.jpg
+datasets/traffic/labels/val/highway/frame001.txt
+```
+
+Run the same images and labels through one or more ONNX models:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_yolo `
+  --images datasets/traffic/images/val `
+  --labels datasets/traffic/labels/val `
+  --model assets/models/yolov8n.onnx `
+  --model assets/models/yolo26n.onnx `
+  --output reports/yolo-evaluation.json
+```
+
+The report includes precision, recall, F1 at confidence `0.25`, mAP@0.5,
+mAP@0.5:0.95, per-class AP, false positives/negatives, model-load time, and
+mean/median/p95 inference latency. The evaluator uses a `0.001` minimum
+inference confidence by default for the mAP confidence curve; tune it with
+`--min-confidence` if needed, and use `--metric-confidence` to change the
+precision/recall operating point. Use the same held-out labeled split for every
+model; the project does not include a labeled traffic evaluation dataset, so
+metrics are only as representative as the images and annotations you provide.
 
 ## Run the applications
 

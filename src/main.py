@@ -2544,7 +2544,7 @@ def _system_overview() -> Dict[str, Any]:
         "uptime_seconds": round(time.monotonic() - START_TIME, 2),
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "ai_layers": [
-            {"name": "Vision intelligence", "detail": "YOLOv8 + adaptive ROI and CLAHE preprocessing", "active": True},
+            {"name": "Vision intelligence", "detail": "YOLO + adaptive ROI and CLAHE preprocessing", "active": True},
             {"name": "Predictive risk engine", "detail": "TTC, lane drift, stall and wrong-way detection", "active": True},
             {"name": "Signal optimization", "detail": "Adaptive green-cycle engine with emergency preemption", "active": True},
             {"name": "Safety portal", "detail": "Citizen SOS, hotspots, and incident dispatching", "active": True},
@@ -4618,7 +4618,7 @@ if __name__ == "__main__":
         ))
     parser.add_argument("--source", type=str, default="0",
                         help="Video source: camera index (0), RTSP URL, or file path")
-    parser.add_argument("--model", type=str, default=DEFAULT_MODEL_PATH, help="YOLOv8 ONNX model path")
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL_PATH, help="YOLO detection ONNX model path")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host IP address")
     parser.add_argument("--port", type=int, default=8000, help="REST API port")
     parser.add_argument("--dashboard-port", type=int, default=8080, help="Dashboard web port")

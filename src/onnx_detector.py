@@ -99,12 +99,13 @@ class ONNXObjectDetector:
         if model_path.suffix.lower() != ".onnx":
             raise ValueError(
                 f"Expected an ONNX model file, got {model_path}. Convert or provide "
-                "a compatible YOLOv8 detection model with the .onnx extension."
+                "a compatible YOLO detection model with the .onnx extension."
             )
         if not model_path.is_file():
             raise FileNotFoundError(
-                f"ONNX model not found: {model_path}. Provide a YOLOv8 detection ONNX "
-                "model at this path (input: NCHW RGB, output: YOLOv8 detection tensor)."
+                f"ONNX model not found: {model_path}. Provide a compatible YOLO "
+                "detection ONNX model at this path (input: NCHW RGB; output: "
+                "YOLO detection tensor or end-to-end xyxy/confidence/class rows)."
             )
 
         options = ort.SessionOptions()
@@ -253,6 +254,7 @@ class ONNXObjectDetector:
 
         expected_channels = class_count + 4
         if prediction.shape[1] == 6:
+            # End-to-end YOLO exports provide xyxy, confidence, and class per row.
             pass
         elif prediction.shape[0] == 6 or prediction.shape[0] == expected_channels or (
             prediction.shape[0] < prediction.shape[1] and prediction.shape[0] <= 512

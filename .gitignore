@@ -10,6 +10,7 @@ data/*.db-*
 data/traffic_violations_log.csv
 assets/models/*.pt
 assets/models/*.onnx
+reports/yolo-evaluation.json
 uploads/*
 !uploads/.gitkeep
 !uploads/citizen_uploads/

@@ -80,6 +80,25 @@ class ONNXDecodeTests(unittest.TestCase):
         np.testing.assert_array_equal(class_ids, [2])
         np.testing.assert_allclose(confidences, [0.95])
 
+    def test_decodes_yolo26_end_to_end_output_and_discards_padding(self) -> None:
+        output = np.zeros((1, 300, 6), dtype=np.float32)
+        output[0, 0] = [10, 20, 40, 60, 0.95, 2]
+        output[0, 1] = [50, 60, 90, 100, 0.25, 3]
+
+        boxes, class_ids, confidences = ONNXObjectDetector._decode(
+            output,
+            image_shape=(100, 100),
+            scale=1.0,
+            pad_x=0,
+            pad_y=0,
+            confidence_threshold=0.3,
+            class_count=80,
+        )
+
+        np.testing.assert_array_equal(boxes, [[10, 20, 40, 60]])
+        np.testing.assert_array_equal(class_ids, [2])
+        np.testing.assert_allclose(confidences, [0.95])
+
     def test_large_frames_use_full_frame_and_overlapping_crops(self) -> None:
         detector = ONNXObjectDetector.__new__(ONNXObjectDetector)
         detector.input_width = 640
