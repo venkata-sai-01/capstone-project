@@ -11,6 +11,7 @@ flowchart LR
     Camera[Camera / RTSP / uploaded video] --> Capture[DynamicTrafficGrabber]
     Capture --> Vision[Frame enhancement and ROI]
     Vision --> Detector[YOLO ONNX detector]
+    Detector --> Overlay[Class/confidence detection overlay]
     Detector --> Tracker[IoU tracker]
     Tracker --> Safety[Speed, incident, pedestrian and vehicle analysis]
     Safety --> Engine[APPoliceRadarSafetyEngine]

@@ -73,6 +73,10 @@ working directory); move it to `assets/models/yolo26n.onnx` or set
 and supports standard YOLO detection tensors as well as end-to-end
 `xyxy, confidence, class` output rows. PyTorch and Ultralytics are needed only
 to obtain/export weights; the application itself continues to use ONNX Runtime.
+Live detections are drawn with class-colored boxes and class/confidence labels.
+The included COCO model detects general classes such as people, cars, and
+trucks; number-plate OCR and seat-belt classification require separately
+trained compatible model weights and are not provided by the included model.
 
 ## Evaluate and compare YOLO models
 

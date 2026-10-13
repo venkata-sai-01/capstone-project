@@ -33,8 +33,10 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.middleware.cors import CORSMiddleware
 from scipy.optimize import minimize
 if __package__:
+    from src.detection_overlay import detection_color, draw_detection_overlay
     from src.onnx_detector import ONNXObjectDetector
 else:
+    from detection_overlay import detection_color, draw_detection_overlay
     from onnx_detector import ONNXObjectDetector
 
 
@@ -2150,12 +2152,6 @@ class APPoliceRadarSafetyEngine:
                     surrounding_obj_count += 1
                 if obj_kind in ("person", "animal"):
                     is_pedestrian = obj_kind == "person"
-                    if is_pedestrian:
-                        label = f"Person #{t_id} {score:.0%}"
-                        color = (0, 230, 255)
-                    else:
-                        label = f"{obj_name.title()} #{t_id} {score:.0%}"
-                        color = (50, 220, 50)
 
                     if 200 <= center_x <= 1080 and (self.crosswalk_y_min <= center_y <= self.crosswalk_y_max + 100):
                         if is_pedestrian:
@@ -2164,19 +2160,25 @@ class APPoliceRadarSafetyEngine:
                             animal_danger_count += 1
                             if obj_name == "cow":
                                 cattle_danger_count += 1
-                        color = (0, 0, 255)
                         cv2.circle(annotated_frame, (center_x, center_y), 8, (0, 0, 255), -1)
 
-                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
-                    cv2.putText(annotated_frame, label, (x1, max(15, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 2)
+                    draw_detection_overlay(
+                        annotated_frame,
+                        (x1, y1, x2, y2),
+                        f"{obj_name.title()} {score:.2f}",
+                        obj_name,
+                        f"Track #{t_id}",
+                    )
                     continue
 
                 if obj_kind == "object":
-                    label = f"{obj_name.title()} #{t_id} {score:.0%}"
-                    color = (160, 190, 220)
-                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 1)
-                    cv2.putText(annotated_frame, label, (x1, max(15, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX,
-                                0.40, color, 1)
+                    draw_detection_overlay(
+                        annotated_frame,
+                        (x1, y1, x2, y2),
+                        f"{obj_name.title()} {score:.2f}",
+                        obj_name,
+                        f"Track #{t_id}",
+                    )
                     continue
 
                 active_count += 1
@@ -2221,19 +2223,23 @@ class APPoliceRadarSafetyEngine:
 
                 if speed_val is not None:
                     is_violator = speed_val > speed_limit
-                    box_color = (0, 255, 100) if not (is_violator or cctns_hit) else (0, 0, 255)
-                    badge = f"{obj_name.title()} #{t_id} {score:.0%} | {speed_val:.1f} km/h"
+                    box_color = (0, 0, 255) if is_violator or cctns_hit else detection_color(obj_name)
+                    vehicle_status = f"Track #{t_id} | {speed_val:.1f} km/h"
                 else:
-                    box_color = (0, 0, 255) if cctns_hit else (255, 200, 0)
-                    badge = f"{obj_name.title()} #{t_id} {score:.0%} | Tracking..."
+                    box_color = (0, 0, 255) if cctns_hit else detection_color(obj_name)
+                    vehicle_status = f"Track #{t_id} | Tracking..."
 
                 if cctns_hit:
-                    badge += " [HOTLIST HIT]"
+                    vehicle_status += " | HOTLIST HIT"
 
-                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), box_color, 2)
-                cv2.rectangle(annotated_frame, (x1, max(0, y1 - 22)), (x1 + len(badge) * 8 + 10, y1), box_color, -1)
-                cv2.putText(annotated_frame, badge, (x1 + 4, max(12, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.40,
-                            (0, 0, 0), 2)
+                draw_detection_overlay(
+                    annotated_frame,
+                    (x1, y1, x2, y2),
+                    f"{obj_name.title()} {score:.2f}",
+                    obj_name,
+                    vehicle_status,
+                    box_color,
+                )
 
                 pts = list(self.trajectories[t_id])
                 for i in range(1, len(pts)):
