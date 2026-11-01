@@ -47,13 +47,14 @@ Streamlit records viewer can be started independently.
 
 ## Runtime request and video flow
 
-1. `src/main.py` reads `.env`, validates the optional PostgreSQL URL, and
+1. `src/config.py` reads `.env`, validates the optional PostgreSQL URL, and
    initializes the configured persistence backend.
 2. The traffic capture worker reads the selected camera, RTSP source, or video
    file. With no active source, the application can display its built-in
    simulator.
-3. The inference worker enhances each frame, applies the configured region of
-   interest, and invokes `YOLO26Detector` in `src/yolo_detector.py`.
+3. The inference worker in `src/services/pipeline.py` enhances each frame,
+   applies the configured region of interest, and invokes `YOLO26Detector` in
+   `src/yolo_detector.py`.
 4. The detector runs the Ultralytics YOLO26 checkpoint on CPU. Large frames
    receive a full-frame pass plus overlapping crop passes; detections are
    merged with class-aware non-maximum suppression.
@@ -74,7 +75,13 @@ representative, labeled traffic footage before operational use.
 
 | Component | Responsibility |
 | --- | --- |
-| `src/main.py` | FastAPI app lifecycle and endpoints; video source and inference orchestration; traffic, safety, and integration engines; persistence adapter. |
+| `src/main.py` | FastAPI app lifecycle, endpoint registration, and application startup; retained as the `python -m src.main` entry point. |
+| `src/config.py` | Project paths, local environment loading, PostgreSQL/SQLite configuration, and database connection adapter. |
+| `src/services/integrations.py` | Traffic-domain engines and their data integrations, including vehicle registry, citizen reports, signals, and telemetry. |
+| `src/services/pipeline.py` | Video capture, YOLO inference orchestration, safety analysis, annotated frames, and WebRTC video track. |
+| `src/services/quantum.py` | Experimental traffic optimization, registry search, and hazard-classification utilities. |
+| `src/services/traffic.py` | Compatibility exports for traffic types and services from the specialized modules. |
+| `src/web/pages.py` | HTML builders for the browser dashboard and API explorer. |
 | `src/yolo_detector.py` | Ultralytics YOLO26 inference, crop inference, class-wise NMS, and IoU tracking. |
 | `dashboard/app.py` | Separate read-only Streamlit viewer for violations, registry, citizen reports, telemetry, and blockchain records. Uses PostgreSQL when `DATABASE_URL` is set and the retained SQLite/CSV files otherwise. |
 | `scripts/configure_postgres.py` | Interactively provisions a dedicated PostgreSQL role and database, verifies the generated app connection, and saves the URL to ignored `.env`. |
@@ -92,7 +99,7 @@ integration status as a live connection to a government or emergency service.
 
 ## Persistence and data layout
 
-The database adapter in `src/main.py` selects PostgreSQL when `DATABASE_URL` is
+The database adapter in `src/config.py` selects PostgreSQL when `DATABASE_URL` is
 present and otherwise uses SQLite files below `SQLITE_DATABASE_DIR` (default:
 `data/`). PostgreSQL connections use the pure-Python `pg8000` driver.
 

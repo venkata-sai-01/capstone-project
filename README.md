@@ -136,7 +136,18 @@ CAPSTONE PROJECT/
 ├── dashboard/               Read-only Streamlit records viewer
 ├── data/                    SQLite sources and violation CSV (migration inputs)
 ├── evidence/violations/     Captured violation snapshots
-├── src/                     FastAPI application and traffic pipeline
+├── src/
+│   ├── main.py              FastAPI entry point, lifecycle, and routes
+│   ├── config.py            Environment, paths, and database configuration
+│   ├── services/
+│   │   ├── integrations.py  Traffic engines and data integrations
+│   │   ├── pipeline.py      Video capture, inference, and safety analysis
+│   │   ├── traffic.py       Compatibility exports for traffic services
+│   │   └── quantum.py       Experimental optimization and classification
+│   ├── web/
+│   │   └── pages.py         Dashboard and API-explorer HTML
+│   ├── yolo_detector.py     YOLO inference and tracking
+│   └── detection_overlay.py Detection visualization
 ├── uploads/
 │   ├── citizen_uploads/     Citizen report attachments
 │   └── videos/              Uploaded traffic videos
