@@ -8,7 +8,7 @@ __pycache__/
 data/*.db
 data/*.db-*
 data/traffic_violations_log.csv
-assets/models/*.pt
+*.pt
 assets/models/*.onnx
 reports/yolo-evaluation.json
 uploads/*

@@ -45,38 +45,35 @@ The migration is repeatable: rows with existing primary/unique keys are left
 unchanged, and the SQLite files and CSV are retained as a backup. Once
 `DATABASE_URL` is configured, both the FastAPI app and the Streamlit records
 viewer use PostgreSQL; new violation records are written to PostgreSQL as well
-as the local CSV. Video files, ONNX model weights, and evidence images remain
+as the local CSV. Video files, YOLO model weights, and evidence images remain
 on disk rather than being stored as large database blobs.
 
-## Configure the YOLO ONNX detector
+## Configure the YOLO26 detector
 
-The traffic pipeline uses ONNX Runtime and defaults to the existing COCO-trained
-YOLOv8 nano model at `assets/models/yolov8n.onnx` for backward compatibility.
-It also accepts compatible exports from newer Ultralytics models, including
-YOLO26. For frames larger than the model input, the detector runs a full-frame
-pass plus overlapping crop passes and merges their results with class-aware
-NMS; this can recover smaller, distant objects at the cost of inference speed.
-Model files are not included in Git.
-
-To use the latest YOLO26 nano detection model, install the current Ultralytics
-package in an environment with PyTorch, export the model to ONNX, then set
-`YOLO_MODEL_PATH=assets/models/yolo26n.onnx` in `.env`:
+The traffic pipeline runs Ultralytics YOLO26 directly and defaults to the
+COCO-pretrained nano checkpoint at `assets/models/yolo26n.pt`. Install project
+dependencies, then download the official checkpoint into that location:
 
 ```powershell
-python -m pip install --upgrade ultralytics
-python -c "from ultralytics import YOLO; YOLO('yolo26n.pt').export(format='onnx', imgsz=640)"
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -c "from ultralytics import YOLO; from pathlib import Path; p=Path('assets/models/yolo26n.pt'); p.parent.mkdir(parents=True, exist_ok=True); YOLO('yolo26n.pt').save(str(p))"
 ```
 
-The export writes `yolo26n.onnx` beside the checkpoint (normally in the current
-working directory); move it to `assets/models/yolo26n.onnx` or set
-`YOLO_MODEL_PATH` to its actual location. The runtime expects NCHW RGB input
-and supports standard YOLO detection tensors as well as end-to-end
-`xyxy, confidence, class` output rows. PyTorch and Ultralytics are needed only
-to obtain/export weights; the application itself continues to use ONNX Runtime.
-Live detections are drawn with class-colored boxes and class/confidence labels.
-The included COCO model detects general classes such as people, cars, and
-trucks; number-plate OCR and seat-belt classification require separately
-trained compatible model weights and are not provided by the included model.
+Alternatively, run the app with internet access and Ultralytics can download
+the default checkpoint when it is first loaded. Set `YOLO_MODEL_PATH` in `.env`
+or pass `--model` to select another Ultralytics detection checkpoint. Model
+weights are local runtime files and are not included in Git. If upgrading an
+existing `.env` from the ONNX version, change `YOLO_MODEL_PATH` to
+`assets/models/yolo26n.pt`.
+
+The detector uses CPU inference by default, full-frame plus overlapping crop
+passes for larger frames, class-aware NMS to merge crop results, and the
+project's IoU tracker. YOLO26's standard one-to-many detection path is used for
+accuracy. Live detections are drawn with class-colored boxes and
+class/confidence labels. The COCO checkpoint detects general classes such as
+people, cars, and trucks; number-plate OCR and seat-belt classification require
+separately trained compatible model weights and are not provided by the
+included model.
 
 ## Evaluate and compare YOLO models
 
@@ -90,14 +87,13 @@ datasets/traffic/images/val/highway/frame001.jpg
 datasets/traffic/labels/val/highway/frame001.txt
 ```
 
-Run the same images and labels through one or more ONNX models:
+Run the same images and labels through one or more YOLO checkpoints:
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.evaluate_yolo `
   --images datasets/traffic/images/val `
   --labels datasets/traffic/labels/val `
-  --model assets/models/yolov8n.onnx `
-  --model assets/models/yolo26n.onnx `
+  --model assets/models/yolo26n.pt `
   --output reports/yolo-evaluation.json
 ```
 
@@ -135,7 +131,7 @@ In VS Code, use **Terminal → Run Task** and choose either app task.
 ```text
 CAPSTONE PROJECT/
 ├── .vscode/                 VS Code interpreter and terminal tasks
-├── assets/models/           Local YOLO ONNX model
+├── assets/models/           Local YOLO26 checkpoint
 ├── scripts/                 PostgreSQL provisioning and data migration
 ├── dashboard/               Read-only Streamlit records viewer
 ├── data/                    SQLite sources and violation CSV (migration inputs)

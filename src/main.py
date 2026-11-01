@@ -34,10 +34,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from scipy.optimize import minimize
 if __package__:
     from src.detection_overlay import detection_color, draw_detection_overlay
-    from src.onnx_detector import ONNXObjectDetector
+    from src.yolo_detector import YOLO26Detector
 else:
     from detection_overlay import detection_color, draw_detection_overlay
-    from onnx_detector import ONNXObjectDetector
+    from yolo_detector import YOLO26Detector
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -47,7 +47,7 @@ VIDEO_UPLOAD_DIR = os.path.join(UPLOADS_DIR, "videos")
 CITIZEN_UPLOAD_DIR = os.path.join(UPLOADS_DIR, "citizen_uploads")
 EVIDENCE_DIR = os.path.join(PROJECT_ROOT, "evidence", "violations")
 CSV_LOG_FILE = os.path.join(DATA_DIR, "traffic_violations_log.csv")
-DEFAULT_MODEL_PATH = os.path.join(PROJECT_ROOT, "assets", "models", "yolov8n.onnx")
+DEFAULT_MODEL_PATH = os.path.join(PROJECT_ROOT, "assets", "models", "yolo26n.pt")
 
 
 def _project_path(path: str) -> str:
@@ -1764,7 +1764,7 @@ class APPoliceRadarSafetyEngine:
     def __init__(self, grabber: DynamicTrafficGrabber, model_path: str = DEFAULT_MODEL_PATH):
         self.grabber = grabber
         self.device = "cpu"
-        self.model = ONNXObjectDetector(model_path)
+        self.model = YOLO26Detector(model_path)
 
         self.incident_detector = VelocityCollisionIncidentDetector()
         self.adaptivity_engine = EnvironmentalAdaptivityEngine()
@@ -2404,7 +2404,7 @@ peer_connections: Set[RTCPeerConnection] = set()
 active_websocket_clients: Set[WebSocket] = set()
 master_track: Optional[WebRTCVideoStreamTrack] = None
 VIDEO_SRC: Union[int, str] = 0
-MODEL_PATH: str = _project_path(os.environ.get("YOLO_MODEL_PATH", "assets/models/yolov8n.onnx"))
+MODEL_PATH: str = _project_path(os.environ.get("YOLO_MODEL_PATH", "assets/models/yolo26n.pt"))
 
 os.makedirs(VIDEO_UPLOAD_DIR, exist_ok=True)
 os.makedirs(CITIZEN_UPLOAD_DIR, exist_ok=True)
@@ -4627,7 +4627,7 @@ if __name__ == "__main__":
         ))
     parser.add_argument("--source", type=str, default="0",
                         help="Video source: camera index (0), RTSP URL, or file path")
-    parser.add_argument("--model", type=str, default=DEFAULT_MODEL_PATH, help="YOLO detection ONNX model path")
+    parser.add_argument("--model", type=str, default=MODEL_PATH, help="Ultralytics YOLO26 .pt model path")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host IP address")
     parser.add_argument("--port", type=int, default=8000, help="REST API port")
     parser.add_argument("--dashboard-port", type=int, default=8080, help="Dashboard web port")

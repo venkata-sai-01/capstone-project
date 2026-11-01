@@ -10,7 +10,7 @@ separate configuration.
 flowchart LR
     Camera[Camera / RTSP / uploaded video] --> Capture[DynamicTrafficGrabber]
     Capture --> Vision[Frame enhancement and ROI]
-    Vision --> Detector[YOLO ONNX detector]
+    Vision --> Detector[Ultralytics YOLO26 detector]
     Detector --> Overlay[Class/confidence detection overlay]
     Detector --> Tracker[IoU tracker]
     Tracker --> Safety[Speed, incident, pedestrian and vehicle analysis]
@@ -35,8 +35,8 @@ flowchart LR
     Streamlit[Read-only Streamlit records viewer] --> DB
     Streamlit --> CSV
 
-    EvalData[Labeled YOLO images] --> Eval[ONNX model evaluation]
-    ModelFiles[Candidate ONNX models] --> Eval
+    EvalData[Labeled YOLO images] --> Eval[YOLO model evaluation]
+    ModelFiles[Candidate YOLO checkpoints] --> Eval
     Eval --> EvalReport[Metrics JSON]
 ```
 
@@ -53,12 +53,10 @@ Streamlit records viewer can be started independently.
    file. With no active source, the application can display its built-in
    simulator.
 3. The inference worker enhances each frame, applies the configured region of
-   interest, and invokes `ONNXObjectDetector` in `src/onnx_detector.py`.
-4. The detector letterboxes RGB input, runs the local YOLO ONNX model with
-   ONNX Runtime, decodes standard detection tensors or end-to-end
-   `xyxy, confidence, class` rows, and applies class-aware non-maximum
-   suppression. Large frames receive a full-frame pass and overlapping crop
-   passes; detections are merged and deduplicated.
+   interest, and invokes `YOLO26Detector` in `src/yolo_detector.py`.
+4. The detector runs the Ultralytics YOLO26 checkpoint on CPU. Large frames
+   receive a full-frame pass plus overlapping crop passes; detections are
+   merged with class-aware non-maximum suppression.
 5. `IoUTracker` assigns simple class-aware track IDs. The safety engine uses
    those IDs to update trajectories, line-crossing timing, speed estimates,
    risk calculations, and annotated detection telemetry.
@@ -66,24 +64,23 @@ Streamlit records viewer can be started independently.
    REST endpoints, dashboard, and WebSocket clients. Violation records are
    persisted to PostgreSQL when configured and appended to the local CSV.
 
-The detector defaults to the compatible YOLOv8 **detection** ONNX model at
-`assets/models/yolov8n.onnx`; `YOLO_MODEL_PATH` can select compatible newer
-exports, including YOLO26. The model file is local and Git-ignored; model
-weights and inference behavior should be validated against representative,
-labeled traffic footage before operational use. See the README for the YOLO26
-ONNX export steps.
+The detector defaults to the COCO-pretrained YOLO26 nano **detection**
+checkpoint at `assets/models/yolo26n.pt`; `YOLO_MODEL_PATH` can select another
+Ultralytics detection checkpoint. The model file is local and Git-ignored.
+Model weights and inference behavior should be validated against
+representative, labeled traffic footage before operational use.
 
 ## Application components
 
 | Component | Responsibility |
 | --- | --- |
 | `src/main.py` | FastAPI app lifecycle and endpoints; video source and inference orchestration; traffic, safety, and integration engines; persistence adapter. |
-| `src/onnx_detector.py` | ONNX Runtime session, YOLO preprocessing/output decoding, crop inference, class-wise NMS, and IoU tracking. |
+| `src/yolo_detector.py` | Ultralytics YOLO26 inference, crop inference, class-wise NMS, and IoU tracking. |
 | `dashboard/app.py` | Separate read-only Streamlit viewer for violations, registry, citizen reports, telemetry, and blockchain records. Uses PostgreSQL when `DATABASE_URL` is set and the retained SQLite/CSV files otherwise. |
 | `scripts/configure_postgres.py` | Interactively provisions a dedicated PostgreSQL role and database, verifies the generated app connection, and saves the URL to ignored `.env`. |
 | `scripts/migrate_sqlite_to_postgres.py` | Copies existing SQLite tables and violation CSV rows to PostgreSQL without replacing rows already present. |
-| `scripts/evaluate_yolo.py` | Compares YOLO ONNX models on a labeled YOLO-format image split, reporting detection quality and inference latency. |
-| `tests/test_onnx_detector.py` | Unit coverage of YOLO output decoding, NMS, crop layout/merging, model-path errors, and tracking. |
+| `scripts/evaluate_yolo.py` | Compares Ultralytics YOLO checkpoints on a labeled YOLO-format image split, reporting detection quality and inference latency. |
+| `tests/test_yolo_detector.py` | Unit coverage of model inference, NMS, crop layout/merging, and tracking. |
 | `tests/test_yolo_evaluation.py` | Tests YOLO label parsing, IoU, and detection metrics. |
 
 The traffic safety engine also contains modules for adaptive traffic signals,
@@ -114,7 +111,7 @@ before execution when the destination already contains important data.
 
 Video uploads and sample videos live in `uploads/videos/`; citizen attachments
 are stored in `uploads/citizen_uploads/`; violation evidence images are stored
-in `evidence/violations/`; and the ONNX model is stored in `assets/models/`.
+in `evidence/violations/`; and the YOLO26 checkpoint is stored in `assets/models/`.
 These artifacts stay on disk and are intentionally excluded from Git. The
 repository includes directory placeholders, not local database contents,
 datasets, evidence, credentials, or model weights.
@@ -137,7 +134,7 @@ origins may be set through the dashboard URL/origin environment variables.
 ## Configuration and startup
 
 1. Install dependencies from `requirements.txt`, create `.env` from
-   `.env.example`, and provide a compatible ONNX model locally.
+   `.env.example`, and download the YOLO26 checkpoint as described in the README.
 2. For SQLite, leave `DATABASE_URL` unset. For PostgreSQL, run
    `scripts/configure_postgres.py` in a terminal and enter the PostgreSQL
    administrator password at its hidden prompt.

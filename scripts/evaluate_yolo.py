@@ -10,7 +10,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from src.onnx_detector import ONNXObjectDetector
+from src.yolo_detector import YOLO26Detector
 
 
 IMAGE_EXTENSIONS = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
@@ -242,7 +242,7 @@ def benchmark_model(
     repeats: int,
 ) -> tuple[dict[str, Any], list[str], int]:
     load_start = time.perf_counter()
-    detector = ONNXObjectDetector(model_path)
+    detector = YOLO26Detector(model_path)
     model_load_seconds = time.perf_counter() - load_start
     names = detector.names
     ground_truth = []
@@ -291,7 +291,7 @@ def benchmark_model(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Compare compatible YOLO ONNX detectors against images with standard "
+            "Compare Ultralytics YOLO detection checkpoints against images with standard "
             "YOLO-format labels."
         )
     )
@@ -302,7 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         action="append",
         required=True,
-        help="YOLO detection ONNX model; repeat this option to compare models.",
+        help="Ultralytics YOLO detection checkpoint (.pt); repeat this option to compare models.",
     )
     parser.add_argument("--output", type=Path, default=Path("reports/yolo-evaluation.json"))
     parser.add_argument(
