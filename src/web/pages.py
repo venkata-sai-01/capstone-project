@@ -8,10 +8,10 @@ else:
     from config import DASHBOARD_API_INTERFACE_URL, DASHBOARD_API_URL, DASHBOARD_UI_URL
 
 
-def build_api_interface_page(openapi_schema):
+def build_api_interface_page(openapi_schema, api_url, dashboard_url):
     schema_json = json.dumps(openapi_schema).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-    api_base_json = json.dumps(DASHBOARD_API_URL)
-    dashboard_base_json = json.dumps(DASHBOARD_UI_URL)
+    api_base_json = json.dumps(api_url)
+    dashboard_base_json = json.dumps(dashboard_url)
     page = r"""<!doctype html>
 <html lang="en">
 <head>
@@ -328,7 +328,7 @@ document.getElementById('search').addEventListener('input', event => {
     return HTMLResponse(page)
 
 
-def build_dashboard_page():
+def build_dashboard_page(api_url, api_interface_url):
     dashboard_html = """<!DOCTYPE html>  
 <html lang="en">  
 <head>  
@@ -1413,8 +1413,8 @@ def build_dashboard_page():
 </html>  
 """
     dashboard_bootstrap = f"""<script>
-window.TRAFFIC_API_BASE = {json.dumps(DASHBOARD_API_URL)} || window.location.origin;
-window.TRAFFIC_API_INTERFACE_URL = {json.dumps(DASHBOARD_API_INTERFACE_URL)};
+window.TRAFFIC_API_BASE = {json.dumps(api_url)} || window.location.origin;
+window.TRAFFIC_API_INTERFACE_URL = {json.dumps(api_interface_url)};
 const dashboardFetch = window.fetch.bind(window);
 window.fetch = (input, init) => {{
     if (typeof input === 'string' && input.startsWith('/')) {{

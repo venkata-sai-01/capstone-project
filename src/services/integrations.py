@@ -1,37 +1,18 @@
-import argparse
 import asyncio
-import csv
 import hashlib
 import hmac
-import importlib
 import json
-import os
 import queue
 import random
 import re
-import sqlite3
-import shutil
 import threading
 import time
-import uuid
-from collections import deque
-from contextlib import asynccontextmanager
 from datetime import datetime
-from fractions import Fraction
-from typing import Any, Deque, Dict, List, Optional, Set, Tuple, TypedDict, Union
-from urllib.parse import unquote, urlparse
+from typing import Any, Deque, Dict, List, Optional, Tuple, TypedDict, Union
 
 import aiohttp
 import cv2
 import numpy as np
-import uvicorn
-from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
-from aiortc.contrib.media import MediaRelay
-from av import VideoFrame
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
-from fastapi.middleware.cors import CORSMiddleware
-from scipy.optimize import minimize
 if __package__ == "src.services":
     from src.detection_overlay import detection_color, draw_detection_overlay
     from src.yolo_detector import YOLO26Detector

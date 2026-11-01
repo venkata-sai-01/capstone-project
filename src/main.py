@@ -300,7 +300,7 @@ async def api_detections():
 
 @api_interface_app.get("/", response_class=HTMLResponse)
 async def api_interface():
-    return build_api_interface_page(app.openapi())
+    return build_api_interface_page(app.openapi(), DASHBOARD_API_URL, DASHBOARD_UI_URL)
 
 
 @app.get("/api-interface", include_in_schema=False)
@@ -310,7 +310,7 @@ async def api_interface_redirect():
 
 @dashboard_app.get("/", response_class=HTMLResponse)
 async def index():
-    return build_dashboard_page()
+    return build_dashboard_page(DASHBOARD_API_URL, DASHBOARD_API_INTERFACE_URL)
 
 
 # ===========================================================================
@@ -621,7 +621,7 @@ if __name__ == "__main__":
     print(" Carbon Audit:      ACTIVE (Fleet Emission Footprint & PUC Compliance)")
     print(" HSRP Audit:        ACTIVE (MoRTH Indian Standard Plate Verification)")
     print(" Quantum QAOA:      ACTIVE (Corridor Congestion & Patrol Placement Optimization)")
-    print(" Quantum Grover:    ACTIVE (O(√N) Quadratic Speedup Transport Record Search)")
+    print(" Quantum Grover:    ACTIVE (O(sqrt(N)) Quadratic Speedup Transport Record Search)")
     print(" Quantum ML (QSVM): ACTIVE (Quantum Kernel Feature Maps & HHL Hazard Solver)")
     print("=" * 85 + "\n")
     _start_auxiliary_server(dashboard_app, "Dashboard", args.host, args.dashboard_port)
