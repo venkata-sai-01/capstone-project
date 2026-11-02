@@ -13,4 +13,7 @@ from .integrations import (
     ap_rto_gateway, vahan_db, timeseries_logger, acoustic_radar, hsrp_engine,
     evpp_engine, weather_engine, emission_auditor,
 )
+from .india_vehicle_codes import (
+    LEGACY_STATE_CODES, RTO_CODES, STATE_CODES, STATE_TYPES, lookup_indian_vehicle_code,
+)
 from .pipeline import APPoliceRadarSafetyEngine, WebRTCVideoStreamTrack

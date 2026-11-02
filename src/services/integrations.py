@@ -24,10 +24,12 @@ else:
 if __package__ == "src.services":
     from src.config import CSV_LOG_FILE, DATABASE_URL, DEFAULT_MODEL_PATH, EVIDENCE_DIR, MODEL_PATH, _connect_database
     from src.detection_overlay import detection_color, draw_detection_overlay
+    from src.services.india_vehicle_codes import lookup_indian_vehicle_code
     from src.yolo_detector import YOLO26Detector
 else:
     from config import CSV_LOG_FILE, DATABASE_URL, DEFAULT_MODEL_PATH, EVIDENCE_DIR, MODEL_PATH, _connect_database
     from detection_overlay import detection_color, draw_detection_overlay
+    from services.india_vehicle_codes import lookup_indian_vehicle_code
     from yolo_detector import YOLO26Detector
 
 
@@ -818,7 +820,7 @@ class APVehicleRegistryEngine:
 
     @staticmethod
     def _row_to_profile(row: tuple) -> Dict[str, Any]:
-        return {
+        profile = {
             "plate": str(row[0]),
             "owner_name": str(row[1]),
             "dl_number": str(row[2]),
@@ -834,6 +836,10 @@ class APVehicleRegistryEngine:
             "puc_status": str(row[12]),
             "reg_date": str(row[13])
         }
+        registration = lookup_indian_vehicle_code(profile["plate"])
+        if registration is not None:
+            profile.update(registration)
+        return profile
 
     def resolve_plate_to_profile(self, raw_plate: str, v_type: str = "car") -> Dict[str, Any]:
         clean_plate = raw_plate.upper().replace(" ", "").replace("-", "")
@@ -850,9 +856,26 @@ class APVehicleRegistryEngine:
         hash_val = int(hashlib.sha256(clean_plate.encode('utf-8')).hexdigest(), 16)
         rng = random.Random(hash_val)
 
-        rto_keys = list(OFFICIAL_AP_RTO_MATRIX.keys())
-        matched_prefix = next((p for p in rto_keys if clean_plate.startswith(p.replace(" ", ""))), rng.choice(rto_keys))
-        dist_info = OFFICIAL_AP_RTO_MATRIX[matched_prefix]
+        registration = lookup_indian_vehicle_code(raw_plate)
+        if registration is None:
+            rto_keys = list(OFFICIAL_AP_RTO_MATRIX.keys())
+            matched_prefix = next(
+                (prefix for prefix in rto_keys if clean_plate.startswith(prefix.replace(" ", ""))),
+                rng.choice(rto_keys),
+            )
+            dist_info = OFFICIAL_AP_RTO_MATRIX[matched_prefix]
+        else:
+            matched_prefix = registration["rto_code"]
+            ap_code = f"AP {registration['district_code'][-2:]}"
+            dist_info = OFFICIAL_AP_RTO_MATRIX.get(ap_code)
+            if dist_info is None:
+                rto_area = registration["rto_area"] or registration["district_code"]
+                dist_info = {
+                    "district": rto_area,
+                    "dto_office": f"{registration['state_name']} RTO {registration['district_code'][-2:]}",
+                    "region": registration["state_name"],
+                    "pin": 0,
+                }
 
         owner_name = f"{rng.choice(FIRST_NAMES)} {rng.choice(LAST_NAMES)}"
         dl_num = f"{matched_prefix.replace(' ', '')}{rng.randint(2015, 2024)}{rng.randint(1000000, 9999999)}"
@@ -876,6 +899,9 @@ class APVehicleRegistryEngine:
             "puc_status": "VALID" if (hash_val % 100) > 8 else "EXPIRED",
             "reg_date": f"{rng.randint(2017, 2024):04d}-{rng.randint(1, 12):02d}-{rng.randint(1, 28):02d}"
         }
+        if registration is not None:
+            profile.update(registration)
+            profile["rto_area"] = registration["rto_area"] or str(dist_info["district"])
 
         with self.lock:
             cur = self.conn.cursor()
@@ -919,7 +945,9 @@ class APVehicleRegistryEngine:
             for r in rows:
                 results.append(self._row_to_profile(r))
 
-        if not results and "AP" in q:
+        if not results and (
+            lookup_indian_vehicle_code(q) is not None or "AP" in q
+        ):
             results.append(self.resolve_plate_to_profile(q))
 
         return results

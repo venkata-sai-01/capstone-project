@@ -75,6 +75,28 @@ people, cars, and trucks; number-plate OCR and seat-belt classification require
 separately trained compatible model weights and are not provided by the
 included model.
 
+## Indian vehicle registration codes
+
+The local vehicle-code library recognizes the current registration prefixes
+for all 28 states and 8 union territories, legacy prefixes, and RTO/district
+registration codes. Lookups are available through
+`src.services.india_vehicle_codes.lookup_indian_vehicle_code`; registry
+profiles also include the parsed state and RTO code.
+
+The RTO directory in `data/india_rto_codes.csv` is based on the community
+[India-Codes RTO dataset](https://github.com/kishorek/India-Codes) and is
+supplemented for Telangana and Ladakh using the
+[RTO district reference list](https://en.wikipedia.org/wiki/List_of_RTO_districts_in_India).
+The Telangana and Ladakh rows are adapted from the Wikipedia reference under
+the [CC BY-SA 4.0 license](https://creativecommons.org/licenses/by-sa/4.0/);
+the attribution and source link are retained here.
+The directory may be incomplete or out of date, some RTO codes cover multiple
+areas, and it is not an official government or VAHAN lookup. Treat a match as
+registration-prefix identification only; verify current jurisdiction with the
+relevant transport department before using it for enforcement or legal
+decisions. Vehicle owner and status details in the local registry remain
+simulated unless connected to an authorized data source.
+
 ## Evaluate and compare YOLO models
 
 Prepare a labeled evaluation split using standard YOLO detection labels: keep
@@ -135,12 +157,14 @@ CAPSTONE PROJECT/
 ├── scripts/                 PostgreSQL provisioning and data migration
 ├── dashboard/               Read-only Streamlit records viewer
 ├── data/                    SQLite sources and violation CSV (migration inputs)
+│   └── india_rto_codes.csv  State/UT and RTO registration-code reference
 ├── evidence/violations/     Captured violation snapshots
 ├── src/
 │   ├── main.py              FastAPI entry point, lifecycle, and routes
 │   ├── config.py            Environment, paths, and database configuration
 │   ├── services/
 │   │   ├── integrations.py  Traffic engines and data integrations
+│   │   ├── india_vehicle_codes.py  State/UT and RTO registration-code lookup
 │   │   ├── pipeline.py      Video capture, inference, and safety analysis
 │   │   ├── traffic.py       Compatibility exports for traffic services
 │   │   └── quantum.py       Experimental optimization and classification

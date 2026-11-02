@@ -1278,6 +1278,7 @@ def build_dashboard_page(api_url, api_interface_url):
                     <div style="color: var(--accent-cyan); font-weight: 700;">Plate: ${rec.plate} [HSRP: ${hsrpData.is_hsrp_compliant ? '✅ COMPLIANT' : '⚠️ NON-COMPLIANT'}]</div>  
                     <div><strong>Owner:</strong> ${rec.owner_name}</div>  
                     <div><strong>Vehicle:</strong> ${rec.make_model} (${rec.fuel_type})</div>  
+                    <div><strong>Registration:</strong> ${rec.state_name || 'Unknown'} (${rec.district_code || 'RTO unknown'})</div>
                     <div><strong>RTO Office:</strong> ${rec.dto_office} (${rec.district})</div>  
                     <div><strong>FASTag ID:</strong> ${rec.fastag_id}</div>  
                     <div><strong>Insurance:</strong> ${rec.insurance_status} | <strong>PUC:</strong> ${rec.puc_status}</div>  

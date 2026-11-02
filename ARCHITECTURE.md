@@ -78,6 +78,7 @@ representative, labeled traffic footage before operational use.
 | `src/main.py` | FastAPI app lifecycle, endpoint registration, and application startup; retained as the `python -m src.main` entry point. |
 | `src/config.py` | Project paths, local environment loading, PostgreSQL/SQLite configuration, and database connection adapter. |
 | `src/services/integrations.py` | Traffic-domain engines and their data integrations, including vehicle registry, citizen reports, signals, and telemetry. |
+| `src/services/india_vehicle_codes.py` | Local state/union-territory and RTO registration-code identification from `data/india_rto_codes.csv`. |
 | `src/services/pipeline.py` | Video capture, YOLO inference orchestration, safety analysis, annotated frames, and WebRTC video track. |
 | `src/services/quantum.py` | Experimental traffic optimization, registry search, and hazard-classification utilities. |
 | `src/services/traffic.py` | Compatibility exports for traffic types and services from the specialized modules. |
@@ -115,6 +116,11 @@ The migration script retains the SQLite database files and source CSV; it does
 not remove, rewrite, or treat them as disposable. Re-running migration skips
 rows with keys that already exist. PostgreSQL migrations should be backed up
 before execution when the destination already contains important data.
+
+The vehicle-code library loads its local RTO directory from
+`data/india_rto_codes.csv`; lookups identify registration prefixes and do not
+query VAHAN or verify vehicle ownership. Refer to the README for the data
+sources and coverage limitations.
 
 Video uploads and sample videos live in `uploads/videos/`; citizen attachments
 are stored in `uploads/citizen_uploads/`; violation evidence images are stored
