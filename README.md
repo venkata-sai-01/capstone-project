@@ -99,34 +99,71 @@ simulated unless connected to an authorized data source.
 
 ## Evaluate and compare YOLO models
 
-Prepare a labeled evaluation split using standard YOLO detection labels: keep
-the image and label trees mirrored, with one `.txt` file per image and rows in
-`class_id x_center y_center width height` normalized to `[0, 1]`. Use an empty
-label file for a negative image. For example:
+Build a starter dataset from videos you have permission to use. Assign
+different source videos to train, validation, and test so neighboring frames
+from one clip cannot leak across splits. The example below uses three local
+videos; replace the paths with your own:
 
-```text
-datasets/traffic/images/val/highway/frame001.jpg
-datasets/traffic/labels/val/highway/frame001.txt
+```powershell
+.\.venv\Scripts\python.exe -m scripts.prepare_yolo_dataset `
+  --train-video "uploads\videos\13654799_1920_1080_30fps.mp4" `
+  --val-video "uploads\videos\42479-431756043_medium.mp4" `
+  --test-video "uploads\videos\4K Road traffic video for object detection and tracking - free download now.mp4" `
+  --frames-per-video 20
 ```
 
-Run the same images and labels through one or more YOLO checkpoints:
+This samples frames into `datasets\traffic\images\{train,val,test}`. A held-out
+test video is required; train and validation videos are optional unless you
+will separately train or tune a model. Use multiple representative test videos
+where possible. Annotate the held-out test images manually using the bundled
+OpenCV tool. Select the object class with keys `1`-`6` (person, bicycle, car,
+motorcycle, bus, truck), drag a box around each visible object, then press `s`
+to save and advance. Press `z` to undo, `c` to clear the current image, `b` to
+save and go back, or `q` to quit. Review negative images too and press `s` to
+save an empty label file for each one:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.annotate_yolo `
+  --images datasets\traffic\images\test `
+  --labels datasets\traffic\labels\test
+```
+
+Repeat for `train` and `val` only if you need labels for those splits. Evaluation
+labels use standard YOLO detection format:
+`class_id x_center y_center width height`, normalized to `[0, 1]`. Class IDs
+are the corresponding COCO IDs used by the included COCO-pretrained detector.
+Do not use model-generated predictions as ground truth. Evaluation requires a
+label file for every image and at least one labeled object in the evaluation
+set; the evaluator fails on missing labels rather than silently treating them
+as negative images.
+
+```text
+datasets\traffic\images\val\highway\frame001.jpg
+datasets\traffic\labels\val\highway\frame001.txt
+```
+
+After all evaluation images are reviewed and labeled, evaluate only the held-out
+test split:
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.evaluate_yolo `
-  --images datasets/traffic/images/val `
-  --labels datasets/traffic/labels/val `
-  --model assets/models/yolo26n.pt `
-  --output reports/yolo-evaluation.json
+  --images datasets\traffic\images\test `
+  --labels datasets\traffic\labels\test `
+  --model assets\models\yolo26n.pt `
+  --output reports\yolo-evaluation.json
 ```
 
-The report includes precision, recall, F1 at confidence `0.25`, mAP@0.5,
+The JSON report includes precision, recall, F1 at confidence `0.25`, mAP@0.5,
 mAP@0.5:0.95, per-class AP, false positives/negatives, model-load time, and
 mean/median/p95 inference latency. The evaluator uses a `0.001` minimum
 inference confidence by default for the mAP confidence curve; tune it with
 `--min-confidence` if needed, and use `--metric-confidence` to change the
-precision/recall operating point. Use the same held-out labeled split for every
-model; the project does not include a labeled traffic evaluation dataset, so
-metrics are only as representative as the images and annotations you provide.
+precision/recall operating point. Compare models on the exact same test images
+and labels. Record the test image/object counts, video sources, model checkpoint,
+settings, hardware, and known limitations when presenting the metrics. The
+repository does not include a pre-labeled traffic benchmark, so do not claim
+evaluation results until the sampled frames have been independently reviewed
+and labeled.
 
 ## Run the applications
 
@@ -154,7 +191,7 @@ In VS Code, use **Terminal → Run Task** and choose either app task.
 CAPSTONE PROJECT/
 ├── .vscode/                 VS Code interpreter and terminal tasks
 ├── assets/models/           Local YOLO26 checkpoint
-├── scripts/                 PostgreSQL provisioning and data migration
+├── scripts/                 Dataset preparation, annotation, evaluation, and DB utilities
 ├── dashboard/               Read-only Streamlit records viewer
 ├── data/                    SQLite sources and violation CSV (migration inputs)
 │   └── india_rto_codes.csv  State/UT and RTO registration-code reference

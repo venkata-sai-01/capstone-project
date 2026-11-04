@@ -9,12 +9,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.evaluate_yolo import (
     box_iou,
+    collect_dataset,
     evaluate_predictions,
     load_yolo_labels,
 )
 
 
 class YoloLabelTests(unittest.TestCase):
+    def test_missing_labels_report_annotator_command_and_all_missing_count(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            images = root / "images"
+            labels = root / "labels"
+            images.mkdir()
+            (images / "frame1.jpg").touch()
+            (images / "frame2.jpg").touch()
+
+            with self.assertRaises(FileNotFoundError) as error:
+                collect_dataset(images, labels)
+            self.assertIn("2 of 2 image(s)", str(error.exception))
+            self.assertIn("scripts.annotate_yolo", str(error.exception))
+
     def test_loads_normalized_yolo_labels_as_pixel_xyxy(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             label_path = Path(directory) / "frame.txt"

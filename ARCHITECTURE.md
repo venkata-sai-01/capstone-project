@@ -87,6 +87,8 @@ representative, labeled traffic footage before operational use.
 | `dashboard/app.py` | Separate read-only Streamlit viewer for violations, registry, citizen reports, telemetry, and blockchain records. Uses PostgreSQL when `DATABASE_URL` is set and the retained SQLite/CSV files otherwise. |
 | `scripts/configure_postgres.py` | Interactively provisions a dedicated PostgreSQL role and database, verifies the generated app connection, and saves the URL to ignored `.env`. |
 | `scripts/migrate_sqlite_to_postgres.py` | Copies existing SQLite tables and violation CSV rows to PostgreSQL without replacing rows already present. |
+| `scripts/prepare_yolo_dataset.py` | Samples video frames into separate train, validation, and test image folders; whole clips are assigned to a split to avoid neighboring-frame leakage. |
+| `scripts/annotate_yolo.py` | Creates human-reviewed YOLO-format bounding-box labels with a local OpenCV annotation window. |
 | `scripts/evaluate_yolo.py` | Compares Ultralytics YOLO checkpoints on a labeled YOLO-format image split, reporting detection quality and inference latency. |
 | `tests/test_yolo_detector.py` | Unit coverage of model inference, NMS, crop layout/merging, and tracking. |
 | `tests/test_yolo_evaluation.py` | Tests YOLO label parsing, IoU, and detection metrics. |

@@ -222,14 +222,30 @@ def collect_dataset(
     if not image_paths:
         raise ValueError(f"No supported images found under {image_directory}.")
     samples = []
+    missing_labels = []
     for image_path in image_paths:
         label_path = label_directory / image_path.relative_to(image_directory).with_suffix(".txt")
         if not label_path.is_file():
-            raise FileNotFoundError(
-                f"Missing YOLO label file for {image_path}: expected {label_path}. "
-                "Create an empty .txt file for images with no labeled objects."
-            )
+            missing_labels.append((image_path, label_path))
+            continue
         samples.append((image_path, label_path))
+    if missing_labels:
+        examples = "\n".join(
+            f"  {image_path} -> {label_path}"
+            for image_path, label_path in missing_labels[:5]
+        )
+        remaining = len(missing_labels) - min(len(missing_labels), 5)
+        if remaining:
+            examples += f"\n  ... and {remaining} more"
+        raise FileNotFoundError(
+            f"{len(missing_labels)} of {len(image_paths)} image(s) are missing YOLO labels.\n"
+            f"Examples:\n{examples}\n"
+            "Create ground-truth labels with the local annotator:\n"
+            f"  python -m scripts.annotate_yolo --images \"{image_directory}\" "
+            f"--labels \"{label_directory}\"\n"
+            "Save an empty label file only when an image truly contains none of the "
+            "target classes."
+        )
     return samples
 
 
