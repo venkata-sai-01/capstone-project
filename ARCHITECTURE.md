@@ -45,6 +45,15 @@ and the API Explorer. The latter two are served by auxiliary Uvicorn threads;
 the REST API owns the application lifespan and traffic pipeline. A separate
 Streamlit records viewer can be started independently.
 
+Protected REST endpoints use separate viewer/operator bearer tokens loaded
+from the ignored local `.env`; viewer access is read-only and operator access
+is required for state-changing API operations. Health and a non-sensitive
+prototype overview are public. The telemetry WebSocket requires an initial
+token-authentication message and allows setting changes only to operators.
+These shared tokens are a local prototype control, not a user-account or
+production identity system. The separate Streamlit records viewer also
+requires a viewer or operator token before it reads personal records.
+
 ## Runtime request and video flow
 
 1. `src/config.py` reads `.env`, validates the optional PostgreSQL URL, and
@@ -99,6 +108,10 @@ reports/SOS, vehicle registry lookup, hotlist checks, acoustic analysis, and
 emergency-vehicle preemption. Several integrations are local simulations or
 sandbox behavior; see the code/configuration before treating a displayed
 integration status as a live connection to a government or emergency service.
+The RTO registry and e-challan flow use local/demo data; SOS records do not
+dispatch to emergency services. The quantum-labelled endpoints are experimental
+local simulations, not quantum-hardware integrations or evidence of a quantum
+speedup. The signal controller is not connected to physical traffic lights.
 
 ## Persistence and data layout
 
@@ -130,6 +143,15 @@ in `evidence/violations/`; and the YOLO26 checkpoint is stored in `assets/models
 These artifacts stay on disk and are intentionally excluded from Git. The
 repository includes directory placeholders, not local database contents,
 datasets, evidence, credentials, or model weights.
+
+The API upload endpoint accepts MP4/AVI/MOV/MKV video only, checks that the
+file can be decoded, generates a server-side filename, and limits uploads to
+500 MiB. Protected API responses are marked `no-store`; local files and
+database contents are not encrypted by the application. Network deployment
+requires an HTTPS reverse proxy, private application ports, encrypted storage
+and backups, access-controlled host/database accounts, and an approved privacy
+and retention policy. The project is not certified for enforcement or
+emergency-response use.
 
 ## Service interfaces
 

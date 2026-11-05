@@ -34,6 +34,19 @@ class WebPageApiConfigurationTests(unittest.TestCase):
             'const configuredDashboardUrl = "http://127.0.0.1:8080";',
             page,
         )
+        self.assertIn("Authorization = `Bearer ${token}`", page)
+        self.assertIn("type:'auth', token", page)
+
+    def test_dashboard_uses_session_scoped_tokens_and_marks_local_simulations(self) -> None:
+        page = build_dashboard_page(
+            "http://127.0.0.1:8000",
+            "http://127.0.0.1:8081",
+        )
+
+        self.assertIn("sessionStorage.setItem('trafficApiToken'", page)
+        self.assertIn("headers.set('Authorization'", page)
+        self.assertIn("EXPERIMENTAL LOCAL SIMULATION (NO QUANTUM HARDWARE)", page)
+        self.assertIn("no government connection", page)
 
 
 if __name__ == "__main__":

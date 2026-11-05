@@ -10,10 +10,10 @@ import queue
 import random
 import re
 import sqlite3
-import shutil
 import threading
 import time
 import uuid
+import math
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -33,9 +33,25 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.middleware.cors import CORSMiddleware
 from scipy.optimize import minimize
 if __package__:
+    from src.auth import (
+        AuthenticationConfigurationError,
+        OPERATOR,
+        PUBLIC_HTTP_PATHS,
+        authenticate_token,
+        required_role,
+        role_allows,
+    )
     from src.detection_overlay import detection_color, draw_detection_overlay
     from src.yolo_detector import YOLO26Detector
 else:
+    from auth import (
+        AuthenticationConfigurationError,
+        OPERATOR,
+        PUBLIC_HTTP_PATHS,
+        authenticate_token,
+        required_role,
+        role_allows,
+    )
     from detection_overlay import detection_color, draw_detection_overlay
     from yolo_detector import YOLO26Detector
 
@@ -181,6 +197,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+MAX_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024
+ALLOWED_VIDEO_EXTENSIONS = {".avi", ".mkv", ".mov", ".mp4"}
+ALLOWED_VIDEO_CONTENT_TYPES = {
+    "application/octet-stream",
+    "video/mp4",
+    "video/quicktime",
+    "video/x-matroska",
+    "video/x-msvideo",
+}
 
 
 @app.get("/")
@@ -205,14 +230,93 @@ async def request_context_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.url.path.startswith("/api/") or request.url.path == "/offer":
+        response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.middleware("http")
+async def api_authentication_middleware(request: Request, call_next):
+    path = request.url.path
+    if request.method == "OPTIONS" or path in PUBLIC_HTTP_PATHS:
+        return await call_next(request)
+    if path != "/offer" and not path.startswith("/api/"):
+        return await call_next(request)
+
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return JSONResponse(
+            {"detail": "A bearer access token is required."},
+            status_code=401,
+            headers={
+                "WWW-Authenticate": "Bearer",
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+    try:
+        role = authenticate_token(token.strip())
+    except AuthenticationConfigurationError as error:
+        return JSONResponse(
+            {"detail": str(error)},
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+        )
+    needed_role = required_role(request.method)
+    if role is None:
+        return JSONResponse(
+            {"detail": "The bearer access token is invalid."},
+            status_code=401,
+            headers={
+                "WWW-Authenticate": "Bearer",
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+    if not role_allows(role, needed_role):
+        return JSONResponse(
+            {"detail": f"The {needed_role} role is required for this operation."},
+            status_code=403,
+            headers={"Cache-Control": "no-store"},
+        )
+    request.state.authenticated_role = role
+    return await call_next(request)
 
 
 @app.websocket("/ws/telemetry")
 async def websocket_telemetry(websocket: WebSocket):
+    origin = websocket.headers.get("origin")
+    if origin and origin.rstrip("/") not in DASHBOARD_ORIGINS:
+        await websocket.close(code=4403, reason="WebSocket origin is not allowed.")
+        return
     await websocket.accept()
-    active_websocket_clients.add(websocket)
     try:
+        try:
+            auth_message = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+        except asyncio.TimeoutError:
+            await websocket.close(code=4401, reason="Authentication timed out.")
+            return
+        try:
+            auth_data = json.loads(auth_message)
+        except json.JSONDecodeError:
+            await websocket.close(code=4401, reason="Authentication is required.")
+            return
+        try:
+            role = (
+                authenticate_token(auth_data.get("token"))
+                if isinstance(auth_data, dict) and auth_data.get("type") == "auth"
+                else None
+            )
+        except AuthenticationConfigurationError:
+            await websocket.close(code=1011, reason="Access control is not configured.")
+            return
+        if role is None:
+            await websocket.close(code=4401, reason="Invalid access token.")
+            return
+        await websocket.send_json({"type": "authenticated", "role": role})
+        active_websocket_clients.add(websocket)
         while True:
             data_text = await websocket.receive_text()
             try:
@@ -222,6 +326,9 @@ async def websocket_telemetry(websocket: WebSocket):
                 continue
             if not isinstance(data, dict):
                 await websocket.send_json({"error": "Telemetry settings must be a JSON object."})
+                continue
+            if role != OPERATOR:
+                await websocket.send_json({"error": "Operator access is required to change settings."})
                 continue
             if pipeline_engine is not None:
                 pipeline_engine.update_params(
@@ -255,23 +362,34 @@ def _system_overview() -> Dict[str, Any]:
     base_health = _database_health_check()
     return {
         "project_name": "AI Traffic Safety Command Center",
-        "status": "operational",
+        "status": "demo_operational",
+        "deployment_class": "local_prototype",
         "database": base_health["database"],
         "uptime_seconds": round(time.monotonic() - START_TIME, 2),
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "ai_layers": [
-            {"name": "Vision intelligence", "detail": "YOLO + adaptive ROI and CLAHE preprocessing", "active": True},
-            {"name": "Predictive risk engine", "detail": "TTC, lane drift, stall and wrong-way detection", "active": True},
-            {"name": "Signal optimization", "detail": "Adaptive green-cycle engine with emergency preemption", "active": True},
-            {"name": "Safety portal", "detail": "Citizen SOS, hotspots, and incident dispatching", "active": True},
-            {"name": "Blockchain dispatch", "detail": "Tamper-proof e-challan evidence chain", "active": True},
+            {"name": "Vision intelligence", "detail": "Local YOLO inference + ROI and CLAHE preprocessing", "active": True},
+            {"name": "Predictive risk engine", "detail": "Local TTC, lane drift, stall and wrong-way heuristics", "active": True},
+            {"name": "Signal optimization", "detail": "Local adaptive signal and emergency-preemption simulation", "active": True},
+            {"name": "Safety portal", "detail": "Local citizen reports and SOS records; no dispatch integration", "active": True},
+            {"name": "Evidence ledger", "detail": "Local SHA-256 linked records; not a distributed blockchain", "active": True},
         ],
         "system_summary": {
-            "stream_mode": "simulator" if pipeline_grabber is not None and not pipeline_grabber.has_source else "live_camera",
+            "stream_mode": (
+                "simulator"
+                if pipeline_grabber is not None and not pipeline_grabber.has_source
+                else "configured_source"
+            ),
             "adaptive_signal": smart_signal.adaptive_mode,
-            "hotlist_status": "active",
-            "weather_engine": "online",
-            "quantum_layer": "ready",
+            "hotlist_status": "local_demo_data",
+            "weather_engine": "frame_heuristic",
+            "quantum_layer": "experimental_local_simulation",
+        },
+        "external_integrations": {
+            "government_registry": "not_connected_local_demo_data",
+            "e_challan_dispatch": ap_rto_gateway.dispatch_status,
+            "emergency_services": "not_connected",
+            "quantum_hardware": "not_connected",
         },
     }
 
@@ -369,16 +487,58 @@ async def api_vahan_lookup(query: str):
 
 @app.post("/api/upload_video")
 async def api_upload_video(file: UploadFile = File(...)):
-    file_name = file.filename if file.filename else f"uploaded_{int(time.time())}.mp4"
-    clean_name = os.path.basename(file_name)
-    file_location = os.path.join(VIDEO_UPLOAD_DIR, clean_name)
+    extension = os.path.splitext(file.filename or "")[1].lower()
+    content_type = (file.content_type or "").lower()
+    if extension not in ALLOWED_VIDEO_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Upload a supported MP4, AVI, MOV, or MKV video.")
+    if content_type and content_type not in ALLOWED_VIDEO_CONTENT_TYPES:
+        raise HTTPException(status_code=415, detail="The uploaded file must have a supported video content type.")
 
-    with open(file_location, "wb") as f:
-        await asyncio.to_thread(shutil.copyfileobj, file.file, f, 1024 * 1024)
+    file_name = f"{uuid.uuid4().hex}{extension}"
+    file_location = os.path.join(VIDEO_UPLOAD_DIR, file_name)
+    total_bytes = 0
+    try:
+        with open(file_location, "xb") as destination:
+            while chunk := await file.read(1024 * 1024):
+                total_bytes += len(chunk)
+                if total_bytes > MAX_VIDEO_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Video uploads are limited to {MAX_VIDEO_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                    )
+                destination.write(chunk)
+        if total_bytes == 0:
+            raise HTTPException(status_code=400, detail="The uploaded video is empty.")
 
-    if pipeline_grabber is not None:
-        pipeline_grabber.switch_source(file_location)
-    return JSONResponse({"status": "ok", "filename": clean_name})
+        capture = cv2.VideoCapture(file_location)
+        try:
+            width = capture.get(cv2.CAP_PROP_FRAME_WIDTH)
+            height = capture.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            if (
+                not capture.isOpened()
+                or not math.isfinite(width)
+                or not math.isfinite(height)
+                or width <= 0
+                or height <= 0
+                or width > 8192
+                or height > 8192
+            ):
+                raise HTTPException(status_code=415, detail="The uploaded file is not a supported video.")
+            decoded, _ = capture.read()
+            if not decoded:
+                raise HTTPException(status_code=415, detail="The uploaded video contains no decodable frames.")
+        finally:
+            capture.release()
+
+        if pipeline_grabber is not None:
+            pipeline_grabber.switch_source(file_location)
+    except Exception:
+        if os.path.exists(file_location):
+            os.remove(file_location)
+        raise
+    finally:
+        await file.close()
+    return JSONResponse({"status": "ok", "filename": file_name})
 
 
 @app.post("/api/switch_source")
@@ -507,7 +667,7 @@ async def api_carbon_audit():
 
 @app.post("/api/quantum/qaoa_optimize")
 async def api_quantum_qaoa_optimize(request: Request):
-    """Executes QAOA on multi-intersection congestion weights to optimize green-splits and patrol placement."""
+    """Runs a local statevector optimization demo; it does not control traffic signals."""
     try:
         data = await request.json()
         congestion = data.get("corridor_congestion", [4.5, 7.8, 3.2, 8.9])
@@ -522,7 +682,7 @@ async def api_quantum_qaoa_optimize(request: Request):
 
 @app.post("/api/quantum/grover_search")
 async def api_quantum_grover_search(request: Request):
-    """Executes Grover's Algorithm with O(sqrt(N)) quadratic speedup to look up vehicle records in VAHAN database."""
+    """Runs a local classical statevector search demo against bundled registry data."""
     try:
         data = await request.json()
         target_plate = data.get("target_plate", "AP 03 BK 4921")
@@ -535,7 +695,7 @@ async def api_quantum_grover_search(request: Request):
 
 @app.post("/api/quantum/qsvm_hazard_classify")
 async def api_quantum_qsvm_classify(request: Request):
-    """Executes Quantum Support Vector Machine (QSVM) and HHL solver on vehicle telemetry to classify driving hazard."""
+    """Runs an experimental local heuristic on telemetry; it is not validated for enforcement."""
     try:
         data = await request.json()
         spd = float(data.get("speed_kmh", 85.0))
@@ -559,11 +719,13 @@ async def api_quantum_qsvm_classify(request: Request):
 async def api_quantum_status():
     """Returns the operational status of all three quantum computing modules."""
     return JSONResponse({
-        "status": "ONLINE",
+        "status": "EXPERIMENTAL_LOCAL_SIMULATION",
+        "quantum_hardware_connected": False,
+        "production_validated": False,
         "modules": {
-            "QAOA": "ACTIVE (Quantum Approximate Optimization Algorithm for Corridor Flow)",
-            "Grover_Search": "ACTIVE (Quadratic Speedup Database Lookup Engine)",
-            "QSVM_HHL": "ACTIVE (Quantum Support Vector Machine & HHL Linear Solver)"
+            "QAOA": "Experimental local optimization simulation; no quantum hardware connection",
+            "Grover_Search": "Experimental local classical search demonstration; no claimed quadratic speedup",
+            "QSVM_HHL": "Experimental local heuristic; not a validated quantum classifier or HHL deployment",
         }
     })
 
@@ -601,28 +763,34 @@ if __name__ == "__main__":
     VIDEO_SRC = int(args.source) if args.source.isdigit() else args.source
     MODEL_PATH = args.model if os.path.isabs(args.model) else _project_path(args.model)
     ap_rto_gateway.env = args.env
+    ap_rto_gateway.dispatch_status = (
+        "sandbox_simulation" if args.env == "SANDBOX" else "configuration_required"
+    )
 
     print("\n" + "=" * 85)
     print(" REAL-TIME MULTI-HAZARD TRAFFIC SURVEILLANCE AND AUTOMATED E-CHALLAN SYSTEM")
     print(f" Web Dashboard:     {DASHBOARD_UI_URL}")
     print(f" API Explorer:      {DASHBOARD_API_INTERFACE_URL}")
     print(f" REST API:          {DASHBOARD_API_URL} (docs: {DASHBOARD_API_URL}/docs)")
-    print(f" Environment:       {args.env} (e-Challan Gateway / VAHAN 4.0 / Radar)")
+    print(
+        f" Environment:       {args.env} (RTO dispatch: "
+        f"{ap_rto_gateway.dispatch_status.replace('_', ' ')})"
+    )
     database_location = (
         "DATABASE_URL" if DATABASE_URL else os.path.abspath(SQLITE_DATABASE_DIR or ".")
     )
     print(f" Database:          {_database_backend().upper()} ({database_location})")
-    print(" Blockchain Ledger: ACTIVE (Cryptographic SHA-256 Tamper-Proof Citations)")
+    print(" Hash-Linked Ledger: ACTIVE (local SHA-256 chain; not distributed blockchain)")
     print(" Smart Signals:     ADAPTIVE (Density-Based Green Timing & Preemption)")
-    print(" Accident Predict:  ACTIVE (TTC Forecasting, Weaving & Tailgating Detection)")
-    print(" Citizen Portal:    ACTIVE (Crowdsourced Hazards & Emergency SOS)")
-    print(" Green Corridor:    ACTIVE (Emergency Vehicle Priority Preemption EVPP)")
-    print(" Weather Engine:    ACTIVE (Visibility & Contrast-Adaptive Speed Limiter)    ")
-    print(" Carbon Audit:      ACTIVE (Fleet Emission Footprint & PUC Compliance)")
-    print(" HSRP Audit:        ACTIVE (MoRTH Indian Standard Plate Verification)")
-    print(" Quantum QAOA:      ACTIVE (Corridor Congestion & Patrol Placement Optimization)")
-    print(" Quantum Grover:    ACTIVE (O(sqrt(N)) Quadratic Speedup Transport Record Search)")
-    print(" Quantum ML (QSVM): ACTIVE (Quantum Kernel Feature Maps & HHL Hazard Solver)")
+    print(" Accident Predict:  LOCAL HEURISTIC DEMO (NOT VALIDATED)")
+    print(" Citizen Portal:    LOCAL REPORT/SOS RECORDS (NO EXTERNAL DISPATCH)")
+    print(" Green Corridor:    LOCAL PREEMPTION SIMULATION (NO PHYSICAL SIGNALS)")
+    print(" Weather Engine:    FRAME-BASED VISIBILITY HEURISTIC")
+    print(" Carbon Audit:      LOCAL EMISSION ESTIMATE")
+    print(" HSRP Audit:        LOCAL PLATE-FORMAT CHECK ONLY")
+    print(" Local Optimizer:   EXPERIMENTAL STATEVECTOR DEMO (NO QUANTUM HARDWARE)")
+    print(" Local Search:      CLASSICAL DEMO (NO QUANTUM SPEEDUP)")
+    print(" Hazard Heuristic:  UNVALIDATED LOCAL DEMO (NOT FOR ENFORCEMENT)")
     print("=" * 85 + "\n")
     _start_auxiliary_server(dashboard_app, "Dashboard", args.host, args.dashboard_port)
     _start_auxiliary_server(api_interface_app, "API Explorer", args.host, args.api_interface_port)

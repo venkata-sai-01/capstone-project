@@ -13,13 +13,10 @@ else:
 # ---------------------------------------------------------------------------
 class TrafficQAOAOptimizer:
     """
-    Quantum Approximate Optimization Algorithm (QAOA) for modeling traffic violations,
-    corridor congestion, and optimizing signal splits and enforcement patrol allocation.
+    Experimental QAOA-inspired statevector simulation for traffic optimization demos.
 
-    Formulates a Quadratic Unconstrained Binary Optimization (QUBO) problem:
-        min x^T Q x + c^T x
-    Maps it to an Ising Cost Hamiltonian H_C and uses a Mixer Hamiltonian H_B = sum(X_i)
-    over p parameterized quantum circuit layers in a hybrid classical-quantum loop.
+    This uses a classical NumPy statevector and SciPy optimizer; it does not run on
+    quantum hardware or control real traffic signals.
     """
 
     def __init__(self, p_layers: int = 2):
@@ -97,7 +94,8 @@ class TrafficQAOAOptimizer:
         patrol_nodes = [f"Corridor Node #{i + 1} (NH-16 / NH-44 Crossing)" for i, b in enumerate(best_bits) if b == 1]
 
         return {
-            "status": "QAOA_GLOBAL_OPTIMUM_CONVERGED",
+            "status": "LOCAL_STATEVECTOR_SIMULATION_COMPLETED",
+            "execution": "classical statevector simulation; no quantum hardware or traffic-controller connection",
             "optimal_bitstring": best_bits,
             "optimal_state_index": best_idx,
             "quantum_fidelity": round(float(probabilities[best_idx]), 4),
@@ -118,8 +116,8 @@ class TrafficQAOAOptimizer:
 # ---------------------------------------------------------------------------
 class GroversVehicleDatabaseSearchEngine:
     """
-    Grover's Algorithm Engine for quadratic speedup O(sqrt(N)) search across transport
-    registry databases (VAHAN 4.0 and CCTNS Hotlist) for rapid e-Challan offender identification.
+    Local statevector demonstration using bundled registry data, not a live VAHAN
+    or CCTNS integration and not a quantum-accelerated database search.
     """
 
     def __init__(self, registry_engine: APVehicleRegistryEngine):
@@ -169,17 +167,17 @@ class GroversVehicleDatabaseSearchEngine:
         resolved_profile = self.registry.resolve_plate_to_profile(matched_plate)
 
         classical_queries = max(1, n_dim // 2)
-        quantum_queries = optimal_steps
 
         return {
-            "status": "GROVER_QUANTUM_MATCH_FOUND",
+            "status": "LOCAL_STATEVECTOR_SIMULATION_COMPLETED",
+            "execution": "classical statevector simulation; no quantum hardware or measured speedup",
             "searched_plate": clean_target,
             "matched_record": resolved_profile,
             "database_size": n_dim,
             "n_qubits": n_qubits,
             "quantum_iterations_required": optimal_steps,
             "classical_average_queries": classical_queries,
-            "theoretical_speedup": f"{round(classical_queries / quantum_queries, 2)}x Speedup",
+            "theoretical_speedup": "not measured; local classical statevector simulation",
             "success_probability": round(float(probabilities[target_idx]), 4),
             "state_fidelity": round(float(np.max(probabilities)), 4)
         }
@@ -190,9 +188,10 @@ class GroversVehicleDatabaseSearchEngine:
 # ---------------------------------------------------------------------------
 class QuantumMLHazardClassifier:
     """
-    Quantum Machine Learning (QML) engine combining Quantum Support Vector Machines (QSVM)
-    with Quantum Feature Maps and the HHL (Harrow-Hassidim-Lloyd) linear system solver
-    to classify multi-hazard highway driving risks from YOLO telemetry.
+    Experimental local kernel heuristic over synthetic telemetry examples.
+
+    The feature-map and linear-system calculations run on classical NumPy arrays;
+    this is not a validated classifier, quantum-hardware run, or enforcement tool.
     """
 
     def __init__(self):
@@ -318,7 +317,8 @@ class QuantumMLHazardClassifier:
             )
 
             return {
-                "status": "QSVM_CLASSIFICATION_SUCCESS",
+                "status": "EXPERIMENTAL_LOCAL_HEURISTIC",
+                "execution": "classical kernel calculation on synthetic examples; not validated for enforcement",
                 "predicted_class_id": pred_idx,
                 "predicted_category": category,
                 "quantum_confidence": round(confidence, 3),

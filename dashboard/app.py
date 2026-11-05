@@ -3,6 +3,7 @@ import io
 import math
 import os
 import sqlite3
+import sys
 from collections import deque
 from contextlib import closing
 from pathlib import Path
@@ -44,6 +45,9 @@ def load_database_url() -> str:
 
 
 DATABASE_URL = load_database_url()
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
+from src.auth import AuthenticationConfigurationError, authenticate_token
 
 
 def postgres_connection_options() -> dict[str, Any]:
@@ -211,7 +215,10 @@ def load_counts() -> dict[str, int]:
 def render_overview() -> None:
     st.header("System overview")
     backend = "PostgreSQL" if DATABASE_URL else "local SQLite"
-    st.caption(f"A read-only view of traffic and citizen-safety records in {backend}.")
+    st.caption(
+        f"A read-only view of local demo traffic and citizen-safety records in {backend}; "
+        "external services are not connected."
+    )
     counts = load_counts()
 
     first_row = st.columns(3)
@@ -221,7 +228,7 @@ def render_overview() -> None:
 
     second_row = st.columns(2)
     second_row[0].metric("Highway telemetry records", counts["highway_telemetry"])
-    second_row[1].metric("Blockchain blocks", counts["blockchain_blocks"])
+    second_row[1].metric("Local hash-linked records", counts["blockchain_blocks"])
 
     st.subheader("Recent violation log")
     try:
@@ -325,8 +332,11 @@ def render_telemetry() -> None:
 
 
 def render_blockchain() -> None:
-    st.header("Challan blockchain")
-    st.caption("Stored block metadata is shown as recorded; this page does not validate hashes.")
+    st.header("Local hash-linked demo ledger")
+    st.caption(
+        "This local SHA-256 linked record chain is not a distributed blockchain; "
+        "stored metadata is shown as recorded."
+    )
     show_database_table(
         "challan_blockchain.db",
         "blockchain_blocks",
@@ -338,6 +348,20 @@ def render_blockchain() -> None:
 def main() -> None:
     st.set_page_config(page_title="Traffic safety dashboard", layout="wide")
     st.title("Traffic safety dashboard")
+    access_token = st.sidebar.text_input(
+        "Viewer or operator access token",
+        type="password",
+        help="Generate tokens with scripts/configure_api_access.py.",
+    )
+    try:
+        role = authenticate_token(access_token)
+    except AuthenticationConfigurationError as exc:
+        st.error(f"Dashboard access is unavailable: {exc}")
+        st.stop()
+    if role is None:
+        st.info("Enter a valid viewer or operator token to access traffic and citizen records.")
+        st.stop()
+    st.sidebar.caption(f"Authenticated as {role}; access is read-only.")
     st.sidebar.header("Navigation")
     page = st.sidebar.radio(
         "Select a section",
@@ -347,7 +371,7 @@ def main() -> None:
             "Vehicle registry",
             "Citizen safety",
             "Highway telemetry",
-            "Challan blockchain",
+            "Local hash-linked ledger",
         ],
     )
 
@@ -357,7 +381,7 @@ def main() -> None:
         "Vehicle registry": render_registry,
         "Citizen safety": render_citizen_safety,
         "Highway telemetry": render_telemetry,
-        "Challan blockchain": render_blockchain,
+        "Local hash-linked ledger": render_blockchain,
     }
     renderers[page]()
     st.sidebar.caption(

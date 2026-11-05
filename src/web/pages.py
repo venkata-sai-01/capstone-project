@@ -306,10 +306,26 @@ websocketButton.addEventListener('click', event => {
         websocketResponse.hidden = false;
         websocketResponse.replaceChildren(text('strong', 'Connecting…'));
         socket.addEventListener('open', () => {
-            socket.send(JSON.stringify(settings));
-            websocketResponse.replaceChildren(text('strong', 'Connected; settings sent.', 'ok'));
-            window.setTimeout(() => socket.close(), 700);
+            const token = document.getElementById('token').value.trim();
+            if (!token) {
+                socket.close();
+                websocketResponse.replaceChildren(text('strong', 'Enter a viewer or operator token first.', 'bad'));
+                return;
+            }
+            socket.send(JSON.stringify({type:'auth', token}));
         }, {once:true});
+        socket.addEventListener('message', event => {
+            const message = JSON.parse(event.data);
+            if (message.type !== 'authenticated') return;
+            if (message.role !== 'operator') {
+                websocketResponse.replaceChildren(text('strong', 'An operator token is required to change telemetry settings.', 'bad'));
+                socket.close();
+                return;
+            }
+            socket.send(JSON.stringify(settings));
+            websocketResponse.replaceChildren(text('strong', 'Authenticated; settings sent.', 'ok'));
+            window.setTimeout(() => socket.close(), 700);
+        });
         socket.addEventListener('error', () => websocketResponse.replaceChildren(text('strong', 'WebSocket connection failed.', 'bad')), {once:true});
     } catch (error) {
         websocketResponse.hidden = false;
@@ -709,16 +725,19 @@ def build_dashboard_page(api_url, api_interface_url):
     <div class="header">  
         <div class="header-title">  
             <h1>Real-Time Multi-Hazard Traffic Surveillance and Automated e-Challan System using Edge YOLO and WebRTC</h1>  
-            <p>Smart Highway Enforcement, AI Predictive Risk Assessment, Adaptive Signal Control, Green Corridor, Blockchain Ledger & Quantum Optimization</p>  
+            <p>Local traffic-safety prototype with computer-vision demos. No government, emergency-service, or physical traffic-signal connection.</p>
         </div>  
         <div class="header-badges">  
             <a class="api-explorer-link" href="#" onclick="window.open(window.TRAFFIC_API_INTERFACE_URL, '_blank', 'noopener'); return false;">API EXPLORER</a>
+            <label for="dashboardAccessToken" style="color: var(--text-muted); font-size: .75rem;">API token</label>
+            <input id="dashboardAccessToken" type="password" autocomplete="off" placeholder="Viewer or operator token" style="max-width: 190px;">
+            <button type="button" class="api-explorer-link" onclick="setDashboardAccessToken()">Save for this tab</button>
             <div class="badge-quantum" id="quantumStatusBadge">  
-                ⚛️ QUANTUM: ACTIVE (QAOA • GROVER • QSVM)  
+                ⚛️ EXPERIMENTAL LOCAL SIMULATION (NO QUANTUM HARDWARE)
             </div>  
             <div class="badge-radar" id="databaseStatusBadge">DATABASE: CHECKING</div>
             <div class="badge-blockchain" id="blockchainStatusBadge">  
-                ⛓️ BLOCKCHAIN: VERIFIED (1 BLOCKS)  
+                LOCAL HASH-LINKED LEDGER: CHECKING
             </div>  
             <div class="badge-radar">  
                 <div class="badge-pulse"></div>  
@@ -758,7 +777,7 @@ def build_dashboard_page(api_url, api_interface_url):
 
             <div class="panel-card detection-panel">
                 <div class="panel-title">
-                    <span>Live Object Detection</span>
+                    <span>Local Object Detection Demo</span>
                     <span id="detectionModelLabel" style="color: var(--text-muted); font-size: 0.72rem;">Waiting for model</span>
                 </div>
                 <div class="detection-summary" id="detectionSummary">
@@ -830,18 +849,18 @@ def build_dashboard_page(api_url, api_interface_url):
                 </div>  
                 <div class="quantum-grid">  
                     <div style="background: rgba(6,182,212,0.06); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(6,182,212,0.2);">  
-                        <div style="font-weight: 700; font-size: 0.82rem; color: var(--accent-cyan); margin-bottom: 0.3rem;">QAOA Optimization</div>  
-                        <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0 0 0.5rem;">Minimizes corridor queue & optimizes highway patrol enforcement.</p>  
+                        <div style="font-weight: 700; font-size: 0.82rem; color: var(--accent-cyan); margin-bottom: 0.3rem;">Experimental Optimization Demo</div>
+                        <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0 0 0.5rem;">Local experimental optimization demo; not connected to traffic controllers.</p>
                         <button class="btn-primary btn-quantum" style="font-size: 0.75rem; padding: 0.4rem;" onclick="runQAOAOptimization()">Run QAOA</button>  
                     </div>  
                     <div style="background: rgba(139,92,246,0.06); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(139,92,246,0.2);">  
-                        <div style="font-weight: 700; font-size: 0.82rem; color: var(--accent-purple); margin-bottom: 0.3rem;">Grover Database Search</div>  
-                        <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0 0 0.5rem;">O(√N) quadratic speedup lookup across VAHAN & CCTNS.</p>  
+                        <div style="font-weight: 700; font-size: 0.82rem; color: var(--accent-purple); margin-bottom: 0.3rem;">Classical Local Search Demo</div>
+                        <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0 0 0.5rem;">Classical local search demonstration; no claimed quantum speedup.</p>
                         <button class="btn-primary" style="background: var(--accent-purple); font-size: 0.75rem; padding: 0.4rem;" onclick="runGroverSearchPrompt()">Run Grover</button>  
                     </div>  
                     <div style="background: rgba(16,185,129,0.06); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(16,185,129,0.2);">  
-                        <div style="font-weight: 700; font-size: 0.82rem; color: var(--accent-green); margin-bottom: 0.3rem;">QSVM Hazard Classifier</div>  
-                        <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0 0 0.5rem;">Quantum Feature Map kernel evaluation & HHL linear solver.</p>  
+                        <div style="font-weight: 700; font-size: 0.82rem; color: var(--accent-green); margin-bottom: 0.3rem;">Experimental Hazard Heuristic</div>
+                        <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0 0 0.5rem;">Experimental local heuristic; not validated for enforcement.</p>
                         <button class="btn-primary" style="background: var(--accent-green); font-size: 0.75rem; padding: 0.4rem;" onclick="runQSVMHazardClassification()">Run QSVM</button>  
                     </div>  
                 </div>  
@@ -852,7 +871,7 @@ def build_dashboard_page(api_url, api_interface_url):
         <div class="sidebar-panel">  
             <div class="panel-card">  
                 <div class="panel-title">Video Feed & Live Stream</div>  
-                <div class="status-badge" id="rtoStatusText">e-Challan Gateway: Connected</div>  
+                <div class="status-badge" id="rtoStatusText">e-Challan: Sandbox simulation; no government connection</div>
                 <div class="upload-box" onclick="document.getElementById('videoFileInput').click()">  
                     <span id="uploadStatusText">Upload Video File (MP4/AVI)</span>  
                     <input type="file" id="videoFileInput" accept="video/*" style="display:none" onchange="uploadVideoFile()">  
@@ -865,7 +884,7 @@ def build_dashboard_page(api_url, api_interface_url):
             </div>  
 
             <div class="panel-card">  
-                <div class="panel-title">Adaptive Smart Signal Controller</div>  
+                <div class="panel-title">Local Simulated Adaptive Signal</div>
                 <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; margin-bottom: 0.5rem;">  
                     <span>Adaptive Density Timing:</span>  
                     <strong style="color: var(--accent-cyan);" id="adaptiveModeText">ENABLED</strong>  
@@ -883,7 +902,7 @@ def build_dashboard_page(api_url, api_interface_url):
             </div>  
 
             <div class="panel-card">  
-                <div class="panel-title">Citizen Safety & Community Report</div>  
+                <div class="panel-title">Local Citizen Safety Demo Records</div>
                 <div style="display: flex; flex-direction: column; gap: 0.5rem;">  
                     <input type="text" id="citizenLocationInput" placeholder="Location (e.g. NH-44 Tirupati Bypass)">  
                     <input type="text" id="citizenDescInput" placeholder="Hazard or Reckless Driving Description">  
@@ -895,7 +914,7 @@ def build_dashboard_page(api_url, api_interface_url):
             </div>  
 
             <div class="panel-card">  
-                <div class="panel-title">VAHAN Registry Query & HSRP Audit</div>  
+                <div class="panel-title">Local Demo Registry Query & HSRP Format Check</div>
                 <div class="action-row registry-search">  
                     <input type="text" id="vahanSearchInput" placeholder="e.g. AP 39 MN 3019 or Tirupati">  
                     <button class="btn-primary" style="width: auto; padding: 0.5rem 0.9rem;" onclick="searchVahanRegistry()">Search</button>  
@@ -929,7 +948,7 @@ def build_dashboard_page(api_url, api_interface_url):
 
             <div class="panel-card" style="flex-grow: 1;">  
                 <div class="panel-title">  
-                    <span>Live Blockchain e-Challan Dispatch</span>  
+                    <span>Local Hash-Linked Demo Ledger (No Government Dispatch)</span>
                     <button class="btn-primary" style="width: auto; padding: 0.3rem 0.6rem; font-size: 0.72rem;" onclick="exportCSV()">Export CSV</button>  
                 </div>  
                 <div class="violation-table" id="violationLogBox">  
@@ -1028,6 +1047,27 @@ def build_dashboard_page(api_url, api_interface_url):
             });
         }
 
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, character => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[character]);
+        }
+
+        function safeSnapshotUrl(value) {
+            try {
+                const url = new URL(value, window.TRAFFIC_API_BASE);
+                if (url.origin !== new URL(window.TRAFFIC_API_BASE).origin ||
+                    url.pathname !== '/api/view_snapshot') return '#';
+                return url.href;
+            } catch {
+                return '#';
+            }
+        }
+
         function applyTelemetry(data) {  
             if (!data) return;  
             document.getElementById('valFps').innerText = (data.fps || 0).toFixed(1);  
@@ -1079,7 +1119,7 @@ def build_dashboard_page(api_url, api_interface_url):
             }  
 
             if (data.blockchain) {  
-                document.getElementById('blockchainStatusBadge').innerText = `⛓️ BLOCKCHAIN: ${data.blockchain.verified ? 'VERIFIED' : 'TAMPERED'} (${data.blockchain.total_blocks} BLOCKS)`;  
+                document.getElementById('blockchainStatusBadge').innerText = `LOCAL HASH-LINKED LEDGER: ${data.blockchain.verified ? 'INTEGRITY OK' : 'INTEGRITY FAILURE'} (${data.blockchain.total_blocks} RECORDS)`;
             }  
 
             if (data.rto_gateway_status) {  
@@ -1089,19 +1129,41 @@ def build_dashboard_page(api_url, api_interface_url):
             if (data.recent_violations && data.recent_violations.length > 0) {  
                 const logBox = document.getElementById('violationLogBox');  
                 logBox.innerHTML = data.recent_violations.map(v =>   
-                    `<a href="${v.snapshot_url}" target="_blank" class="violation-item" style="${v.cctns_alert ? 'border-left-color: #f59e0b; background: rgba(245,158,11,0.1);' : ''}">  
+                    `<a href="${escapeHtml(safeSnapshotUrl(v.snapshot_url))}" target="_blank" rel="noopener noreferrer" class="violation-item" style="${v.cctns_alert ? 'border-left-color: #f59e0b; background: rgba(245,158,11,0.1);' : ''}">
                         <div>  
-                            <strong>[${v.challan_no}] ${v.plate}</strong> ${v.cctns_alert ? '<span style="color: #f59e0b;">⚠️ HOTLIST</span>' : ''}<br>  
-                            <span style="color: var(--text-muted)">${v.owner} | Block #${v.blockchain_block} | ${v.violation}</span>  
+                            <strong>[${escapeHtml(v.challan_no)}] ${escapeHtml(v.plate)}</strong> ${v.cctns_alert ? '<span style="color: #f59e0b;">⚠️ HOTLIST</span>' : ''}<br>
+                            <span style="color: var(--text-muted)">${escapeHtml(v.owner)} | Block #${escapeHtml(v.blockchain_block)} | ${escapeHtml(v.violation)}</span>
                         </div>  
                         <div style="text-align: right;">  
-                            <div class="speed-tag">${v.speed} km/h</div>  
-                            <div class="fine-tag">Rs. ${v.fine}</div>  
+                            <div class="speed-tag">${escapeHtml(v.speed)} km/h</div>
+                            <div class="fine-tag">Rs. ${escapeHtml(v.fine)}</div>
                         </div>  
                     </a>`  
                 ).join('');  
             }  
+
         }  
+
+        document.getElementById('violationLogBox').addEventListener('click', async event => {
+            const link = event.target.closest('a.violation-item');
+            if (!link || link.href.endsWith('#')) return;
+            event.preventDefault();
+            const preview = window.open('about:blank', '_blank');
+            if (!preview) {
+                alert('Allow pop-ups to open protected evidence.');
+                return;
+            }
+            try {
+                const response = await fetch(link.href);
+                if (!response.ok) throw new Error('Evidence access failed. Check your viewer token.');
+                const objectUrl = URL.createObjectURL(await response.blob());
+                preview.location.href = objectUrl;
+                window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+            } catch (error) {
+                preview.close();
+                alert(error.message);
+            }
+        });
 
         let telemetryFramePending = false;
         let latestTelemetry = null;
@@ -1118,9 +1180,17 @@ def build_dashboard_page(api_url, api_interface_url):
         }
 
         function initWebSocket() {  
+            if (!window.TRAFFIC_AUTH_TOKEN) return;
             try {  
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';  
                 ws = new WebSocket(protocol + '//' + window.location.host + '/ws/telemetry');  
+                window.dashboardTelemetrySocket = ws;
+                ws.onopen = () => {
+                    ws.send(JSON.stringify({
+                        type: 'auth',
+                        token: window.TRAFFIC_AUTH_TOKEN || ''
+                    }));
+                };
                 ws.onmessage = (event) => {  
                     try {
                         const message = JSON.parse(event.data);
@@ -1129,14 +1199,17 @@ def build_dashboard_page(api_url, api_interface_url):
                         console.error('Invalid telemetry message', error);
                     }
                 };  
-                ws.onclose = () => { setTimeout(initWebSocket, 4000); };  
+                ws.onclose = () => {
+                    if (window.TRAFFIC_AUTH_TOKEN) setTimeout(initWebSocket, 4000);
+                };
                 ws.onerror = () => { ws.close(); };  
             } catch (error) {
                 console.error('WebSocket initialization failed', error);
                 window.setTimeout(initWebSocket, 4000);
             }
         }  
-        initWebSocket();  
+        window.startDashboardTelemetry = initWebSocket;
+        if (window.TRAFFIC_AUTH_TOKEN) initWebSocket();
 
         async function toggleStream() {  
             const btn = document.getElementById('streamBtn');  
@@ -1276,12 +1349,12 @@ def build_dashboard_page(api_url, api_interface_url):
                 box.style.display = 'block';  
                 box.innerHTML = `  
                     <div style="color: var(--accent-cyan); font-weight: 700;">Plate: ${rec.plate} [HSRP: ${hsrpData.is_hsrp_compliant ? '✅ COMPLIANT' : '⚠️ NON-COMPLIANT'}]</div>  
-                    <div><strong>Owner:</strong> ${rec.owner_name}</div>  
-                    <div><strong>Vehicle:</strong> ${rec.make_model} (${rec.fuel_type})</div>  
-                    <div><strong>Registration:</strong> ${rec.state_name || 'Unknown'} (${rec.district_code || 'RTO unknown'})</div>
-                    <div><strong>RTO Office:</strong> ${rec.dto_office} (${rec.district})</div>  
-                    <div><strong>FASTag ID:</strong> ${rec.fastag_id}</div>  
-                    <div><strong>Insurance:</strong> ${rec.insurance_status} | <strong>PUC:</strong> ${rec.puc_status}</div>  
+                    <div><strong>Owner:</strong> ${escapeHtml(rec.owner_name)}</div>
+                    <div><strong>Vehicle:</strong> ${escapeHtml(rec.make_model)} (${escapeHtml(rec.fuel_type)})</div>
+                    <div><strong>Registration:</strong> ${escapeHtml(rec.state_name || 'Unknown')} (${escapeHtml(rec.district_code || 'RTO unknown')})</div>
+                    <div><strong>RTO Office:</strong> ${escapeHtml(rec.dto_office)} (${escapeHtml(rec.district)})</div>
+                    <div><strong>FASTag ID:</strong> ${escapeHtml(rec.fastag_id)}</div>
+                    <div><strong>Insurance:</strong> ${escapeHtml(rec.insurance_status)} | <strong>PUC:</strong> ${escapeHtml(rec.puc_status)}</div>
                 `;  
             } else {  
                 box.style.display = 'block';  
@@ -1332,26 +1405,37 @@ def build_dashboard_page(api_url, api_interface_url):
 
         async function triggerEmergencySOS() {  
             const loc = document.getElementById('citizenLocationInput').value.trim() || "Active Surveillance Zone (Live GPS)";  
-            if (confirm("Send emergency SOS alert to nearest Highway Patrol & 112 Control Room?")) {  
+            if (confirm("Create a local SOS demo record? No emergency service will be contacted.")) {
                 const resp = await fetch('/api/citizen/sos_alert', {  
                     method: 'POST',  
                     headers: { 'Content-Type': 'application/json' },  
                     body: JSON.stringify({ location: loc, details: "Citizen Emergency Request from Dashboard" })  
                 });  
                 const res = await resp.json();  
-                alert("🚨 SOS Broadcast Confirmed! Reference ID: " + res.event.report_id);  
+                alert("Local SOS record created. No external service was contacted. Reference ID: " + res.event.report_id);
             }  
         }  
 
-        function exportCSV() {  
-            window.location.href = window.TRAFFIC_API_BASE + '/api/export_violations';
+        async function exportCSV() {
+            try {
+                const response = await fetch(window.TRAFFIC_API_BASE + '/api/export_violations');
+                if (!response.ok) throw new Error('CSV export failed. Check your viewer token.');
+                const objectUrl = URL.createObjectURL(await response.blob());
+                const link = document.createElement('a');
+                link.href = objectUrl;
+                link.download = 'Traffic_Violations_Report.csv';
+                link.click();
+                URL.revokeObjectURL(objectUrl);
+            } catch (error) {
+                alert(error.message);
+            }
         }  
 
         // Quantum Functions
         async function runQAOAOptimization() {
             const outBox = document.getElementById('quantumOutputCard');
             outBox.style.display = 'block';
-            outBox.innerHTML = '<span style="color:var(--accent-cyan);">⚛️ Running QAOA Quantum Circuit Optimization on Corridor Segments...</span>';
+            outBox.innerHTML = '<span style="color:var(--accent-cyan);">Running local statevector optimization demo...</span>';
             const resp = await fetch('/api/quantum/qaoa_optimize', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1359,7 +1443,7 @@ def build_dashboard_page(api_url, api_interface_url):
             });
             const res = await resp.json();
             outBox.innerHTML = `
-                <div style="color:var(--accent-cyan); font-weight:700;">⚛️ QAOA QUANTUM OPTIMIZATION RESULTS:</div>
+                <div style="color:var(--accent-cyan); font-weight:700;">EXPERIMENTAL STATEVECTOR SIMULATION RESULTS:</div>
                 <div>Status: ${res.status} | Ground Energy: ${res.ground_energy}</div>
                 <div>Optimal Bitstring: <strong>[${res.optimal_bitstring.join(', ')}]</strong> (State Index: ${res.optimal_state_index})</div>
                 <div>Quantum Fidelity: <strong>${(res.quantum_fidelity * 100).toFixed(1)}%</strong></div>
@@ -1369,11 +1453,11 @@ def build_dashboard_page(api_url, api_interface_url):
         }
 
         async function runGroverSearchPrompt() {
-            const plate = prompt("Enter target license plate to search using Grover's Algorithm:", "AP 03 BK 4921");
+            const plate = prompt("Enter a plate to look up in the local demo registry:", "AP 03 BK 4921");
             if (!plate) return;
             const outBox = document.getElementById('quantumOutputCard');
             outBox.style.display = 'block';
-            outBox.innerHTML = `<span style="color:var(--accent-purple);">⚛️ Executing Grover's Algorithm with O(√N) Quadratic Search on Database...</span>`;
+            outBox.innerHTML = `<span style="color:var(--accent-purple);">Running local classical statevector search demo...</span>`;
             const resp = await fetch('/api/quantum/grover_search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1381,10 +1465,10 @@ def build_dashboard_page(api_url, api_interface_url):
             });
             const res = await resp.json();
             outBox.innerHTML = `
-                <div style="color:var(--accent-purple); font-weight:700;">⚛️ GROVER'S QUANTUM SEARCH COMPLETE:</div>
+                <div style="color:var(--accent-purple); font-weight:700;">LOCAL SEARCH DEMO COMPLETE:</div>
                 <div>Target Matched: <strong>${res.matched_record.plate}</strong> (${res.matched_record.owner_name})</div>
-                <div>Database Space: N = ${res.database_size} | Quantum Iterations: ${res.quantum_iterations_required}</div>
-                <div>Quantum Speedup: <strong>${res.theoretical_speedup}</strong> (vs ${res.classical_average_queries} classical queries)</div>
+                <div>Simulated statevector dimension: N = ${res.database_size} | Simulation iterations: ${res.quantum_iterations_required}</div>
+                <div>Measured hardware speedup: <strong>None; this is a classical simulation.</strong></div>
                 <div>Measurement Probability: <strong>${(res.success_probability * 100).toFixed(1)}%</strong></div>
                 <div>Registered DTO: ${res.matched_record.dto_office} | FASTag: ${res.matched_record.fastag_id}</div>
             `;
@@ -1393,7 +1477,7 @@ def build_dashboard_page(api_url, api_interface_url):
         async function runQSVMHazardClassification() {
             const outBox = document.getElementById('quantumOutputCard');
             outBox.style.display = 'block';
-            outBox.innerHTML = '<span style="color:var(--accent-green);">⚛️ Evaluating Quantum Kernel Map and HHL Linear System Solver...</span>';
+            outBox.innerHTML = '<span style="color:var(--accent-green);">Running experimental local kernel heuristic...</span>';
             const resp = await fetch('/api/quantum/qsvm_hazard_classify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1401,7 +1485,7 @@ def build_dashboard_page(api_url, api_interface_url):
             });
             const res = await resp.json();
             outBox.innerHTML = `
-                <div style="color:var(--accent-green); font-weight:700;">⚛️ QSVM QUANTUM HAZARD CLASSIFICATION:</div>
+                <div style="color:var(--accent-green); font-weight:700;">UNVALIDATED LOCAL HEURISTIC RESULT:</div>
                 <div>Hazard Prediction: <strong style="color:var(--accent-red);">${res.predicted_category}</strong></div>
                 <div>Confidence Score: <strong>${(res.quantum_confidence * 100).toFixed(1)}%</strong></div>
                 <div>Quantum Kernel Alignment: K(x, centroid) = ${res.quantum_kernel_similarity}</div>
@@ -1416,12 +1500,38 @@ def build_dashboard_page(api_url, api_interface_url):
     dashboard_bootstrap = f"""<script>
 window.TRAFFIC_API_BASE = {json.dumps(api_url)} || window.location.origin;
 window.TRAFFIC_API_INTERFACE_URL = {json.dumps(api_interface_url)};
+window.TRAFFIC_AUTH_TOKEN = sessionStorage.getItem('trafficApiToken') || '';
+window.setDashboardAccessToken = () => {{
+    const input = document.getElementById('dashboardAccessToken');
+    window.TRAFFIC_AUTH_TOKEN = input.value.trim();
+    if (window.TRAFFIC_AUTH_TOKEN) {{
+        sessionStorage.setItem('trafficApiToken', window.TRAFFIC_AUTH_TOKEN);
+    }} else {{
+        sessionStorage.removeItem('trafficApiToken');
+    }}
+    const socket = window.dashboardTelemetrySocket;
+    if (socket && socket.readyState < WebSocket.CLOSING) {{
+        socket.close();
+    }} else if (window.TRAFFIC_AUTH_TOKEN && window.startDashboardTelemetry) {{
+        window.startDashboardTelemetry();
+    }}
+}};
+document.addEventListener('DOMContentLoaded', () => {{
+    const input = document.getElementById('dashboardAccessToken');
+    if (input) input.value = window.TRAFFIC_AUTH_TOKEN;
+}});
 const dashboardFetch = window.fetch.bind(window);
 window.fetch = (input, init) => {{
     if (typeof input === 'string' && input.startsWith('/')) {{
         input = new URL(input, window.TRAFFIC_API_BASE).href;
     }}
-    return dashboardFetch(input, init);
+    const requestUrl = input instanceof Request ? input.url : String(input);
+    const headers = new Headers(init && init.headers || (input instanceof Request ? input.headers : undefined));
+    const apiOrigin = new URL(window.TRAFFIC_API_BASE).origin;
+    if (new URL(requestUrl, window.location.href).origin === apiOrigin && window.TRAFFIC_AUTH_TOKEN) {{
+        headers.set('Authorization', `Bearer ${{window.TRAFFIC_AUTH_TOKEN}}`);
+    }}
+    return dashboardFetch(input, {{...init, headers}});
 }};
 const DashboardWebSocket = window.WebSocket;
 window.WebSocket = class extends DashboardWebSocket {{

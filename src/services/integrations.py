@@ -2,13 +2,16 @@ import asyncio
 import hashlib
 import hmac
 import json
+import os
 import queue
 import random
 import re
+import secrets
 import threading
 import time
 from datetime import datetime
 from typing import Any, Deque, Dict, List, Optional, Tuple, TypedDict, Union
+from urllib.parse import urlparse
 
 import aiohttp
 import cv2
@@ -645,10 +648,13 @@ class CitizenSafetyPortalEngine:
         sos_event = self.create_report(
             r_type="EMERGENCY_SOS",
             location=location,
-            desc=f"🚨 CITIZEN SOS TRIGGERED: {details}",
-            phone="POLICE_DISPATCH_112"
+            desc=f"LOCAL SOS DEMO RECORD: {details}",
         )
-        return {"status": "SOS_DISPATCHED", "event": sos_event}
+        return {
+            "status": "LOCAL_RECORD_CREATED",
+            "external_dispatch": False,
+            "event": sos_event,
+        }
 
     def get_recent_reports(self, limit: int = 15) -> List[CitizenSafetyReport]:
         with self.lock:
@@ -691,30 +697,41 @@ class APCCTNSHotlistDatabase:
 
 
 class APRTOIntegrationGateway:
-    """Asynchronous Message Queue & API connectivity for Transport Department & e-Challan Gateway."""
+    """Local sandbox queue with explicitly configured optional HTTPS dispatch."""
 
-    def __init__(self, api_base: str = "https://aptransport.org/api/v1",
-                 secret_key: str = "POLICE_SECURE_HMAC_KEY_2026", env: str = "SANDBOX"):
-        self.api_base = api_base
-        self.secret_key = secret_key
+    def __init__(
+        self,
+        api_base: Optional[str] = None,
+        secret_key: Optional[str] = None,
+        api_token: Optional[str] = None,
+        env: str = "SANDBOX",
+    ):
+        self.api_base = (api_base or os.environ.get("RTO_API_BASE", "")).rstrip("/")
+        self.secret_key = secret_key or os.environ.get("RTO_HMAC_SECRET", "")
+        self.api_token = api_token or os.environ.get("RTO_API_TOKEN", "")
+        self._signing_key = self.secret_key or secrets.token_urlsafe(48)
         self.env = env
         self.outbound_queue: queue.Queue = queue.Queue(maxsize=2000)
         self.running: bool = False
         self.thread: Optional[threading.Thread] = None
         self.total_dispatched: int = 0
         self.failed_dispatches: int = 0
+        self.dispatch_status = "sandbox_simulation" if env == "SANDBOX" else "configuration_required"
+        self._configuration_warning_logged = False
 
     def start(self):
         self.running = True
         worker_thread = threading.Thread(target=self._dispatcher_worker, daemon=True)
         self.thread = worker_thread
         worker_thread.start()
-        print(f"[RTO Gateway] Active in {self.env} Mode. HMAC-SHA256 non-repudiation enabled.")
+        print(f"[RTO Gateway] {self.dispatch_status.replace('_', ' ').upper()}.")
 
     def submit_challan_async(self, challan_payload: Dict[str, Any]):
         try:
             msg = f"{challan_payload['challan_no']}|{challan_payload['plate_number']}|{challan_payload['fine_amount']}|{challan_payload['timestamp']}"
-            signature = hmac.new(self.secret_key.encode('utf-8'), msg.encode('utf-8'), hashlib.sha256).hexdigest()
+            signature = hmac.new(
+                self._signing_key.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256
+            ).hexdigest()
             challan_payload["digital_signature"] = signature
 
             mined_block = blockchain_ledger.mint_challan_block(challan_payload)
@@ -749,10 +766,31 @@ class APRTOIntegrationGateway:
             await asyncio.sleep(0.04)
             return True
 
+        parsed_url = urlparse(self.api_base)
+        if (
+            self.env != "PRODUCTION"
+            or parsed_url.scheme != "https"
+            or not parsed_url.hostname
+            or parsed_url.username
+            or parsed_url.password
+            or parsed_url.query
+            or parsed_url.fragment
+            or len(self.secret_key) < 32
+            or not self.api_token
+        ):
+            self.dispatch_status = "production_dispatch_disabled_missing_secure_configuration"
+            if not self._configuration_warning_logged:
+                print(
+                    "[RTO Gateway] Production dispatch disabled. Configure an HTTPS RTO_API_BASE, "
+                    "RTO_API_TOKEN, and a 32+ character RTO_HMAC_SECRET from an authorized provider."
+                )
+                self._configuration_warning_logged = True
+            return False
+
         headers = {
-            "Authorization": "Bearer POLICE_TOKEN_PROD",
+            "Authorization": f"Bearer {self.api_token}",
             "X-Signature": str(payload.get("digital_signature", "")),
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
         try:
             timeout = aiohttp.ClientTimeout(total=4.0)
@@ -762,9 +800,16 @@ class APRTOIntegrationGateway:
                     json=payload,
                     headers=headers,
                     timeout=timeout,
-                ) as resp:
-                    return resp.status in (200, 201)
+                ) as response:
+                    succeeded = response.status in (200, 201)
+                    self.dispatch_status = (
+                        "external_dispatch_connected"
+                        if succeeded
+                        else "external_dispatch_rejected"
+                    )
+                    return succeeded
         except (aiohttp.ClientError, asyncio.TimeoutError):
+            self.dispatch_status = "external_dispatch_failed"
             return False
 
     def stop(self):
@@ -772,7 +817,6 @@ class APRTOIntegrationGateway:
         if self.thread is not None and self.thread.is_alive():
             self.thread.join(timeout=1.0)
             self.thread = None
-
 
 ap_cctns_radar = APCCTNSHotlistDatabase()
 ap_rto_gateway = APRTOIntegrationGateway()

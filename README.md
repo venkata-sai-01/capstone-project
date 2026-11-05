@@ -48,6 +48,69 @@ viewer use PostgreSQL; new violation records are written to PostgreSQL as well
 as the local CSV. Video files, YOLO model weights, and evidence images remain
 on disk rather than being stored as large database blobs.
 
+## Configure API access control
+
+The REST API protects registry searches, violation/evidence exports, reports,
+telemetry, and other non-health endpoints with bearer tokens. Viewer tokens can
+read protected data; operator tokens can also change settings, switch sources,
+upload video, trigger local simulations, and create reports. Access is denied
+when credentials are missing or invalid. Generate separate random tokens in
+the ignored local `.env` file:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\configure_api_access.py
+```
+
+Copy the appropriate token from `.env` into the browser dashboard, API
+Explorer, or read-only Streamlit viewer. Keep `.env` private; never paste tokens into
+source control, screenshots, issue trackers, or chat. Re-run the setup script
+to rotate both tokens. These are shared role tokens, not individual accounts;
+there is no per-user identity, revocation, or audit trail.
+
+Uploads require an operator token, an MP4/AVI/MOV/MKV extension and video
+content type, a decodable frame, and are limited to 500 MiB. Evidence and
+violation endpoints send `Cache-Control: no-store`; this does not encrypt data
+at rest. For any network deployment, put the service behind HTTPS, keep the
+application ports private, use encrypted storage and backups, define a lawful
+retention/deletion policy for plate and video data, and restrict file/database
+permissions. The included app is a local prototype; these controls alone do
+not make it production-ready or compliant with any jurisdiction's privacy law.
+
+## Validate detection accuracy
+
+Do not treat example images, unit tests, confidence values, or a successful
+inference as accuracy evidence. The checked-in traffic image splits currently
+have no matching human-reviewed YOLO labels, so this repository cannot produce
+a defensible precision/recall/mAP result yet. Collect permitted, representative
+footage; annotate every evaluation image; keep source clips separated between
+training, validation, and held-out test sets; then run the evaluator, for
+example:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_yolo `
+  --images "datasets\traffic\images\test" `
+  --labels "datasets\traffic\labels\test" `
+  --model "assets\models\yolo26n.pt" `
+  --output "reports\yolo-evaluation.json"
+```
+
+Review the report's per-class precision, recall, F1, mAP, and latency on the
+actual target hardware. Define acceptance thresholds and independently review
+false positives/negatives before considering operational use. Never use an
+unvalidated automated detection as the sole basis for enforcement or emergency
+response.
+
+The e-challan gateway defaults to local sandbox simulation. Selecting
+`--env PRODUCTION` alone does not enable external transmission: dispatch is
+disabled unless an authorized provider has supplied `RTO_API_BASE` (HTTPS),
+`RTO_API_TOKEN`, and a unique `RTO_HMAC_SECRET` of at least 32 characters in
+the private `.env` file. No government API credentials or service connection
+are included with this project. Verify the provider's integration contract and
+approval before enabling any real dispatch.
+Citizen SOS requests create local records only; they do not contact police,
+ambulance, or emergency services. Signal-control and green-corridor actions
+also affect only this prototype's in-memory simulation.
+
 ## Configure the YOLO26 detector
 
 The traffic pipeline runs Ultralytics YOLO26 directly and defaults to the

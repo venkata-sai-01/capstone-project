@@ -116,7 +116,7 @@ class APPoliceRadarSafetyEngine:
             "detections": [],
             "detection_model": os.path.basename(model_path),
             "incidents": [],
-            "rto_gateway_status": "ONLINE (e-Challan Gateway Live)",
+            "rto_gateway_status": ap_rto_gateway.dispatch_status.replace("_", " ").upper(),
             "recent_violations": [],
             "predictive_risk_score": 0.0,
             "traffic_signal": {"phase": "GREEN", "seconds_in_phase": 0, "adaptive_active": True},
@@ -349,8 +349,14 @@ class APPoliceRadarSafetyEngine:
             if raw_bgr is None:
                 continue
 
-            t_start = time.perf_counter()
+            t_start = time.perf_counter(            )
             with self.lock:
+                dispatch_status = ap_rto_gateway.dispatch_status
+                dispatch_count_label = (
+                    f"Sandbox records: {ap_rto_gateway.total_dispatched}"
+                    if dispatch_status == "sandbox_simulation"
+                    else f"External successes: {ap_rto_gateway.total_dispatched}"
+                )
                 conf = self.conf_threshold
                 speed_limit = self.speed_limit_kmh
                 distance_m = self.calibration_distance_m
@@ -634,7 +640,11 @@ class APPoliceRadarSafetyEngine:
                     "weather": weather_stats,
                     "carbon_emissions": emission_data,
                     "blockchain": {"verified": chain_ok, "total_blocks": total_blocks, "status_text": chain_msg},
-                    "rto_gateway_status": f"ONLINE (Gateway {ap_rto_gateway.env} | Dispatched: {ap_rto_gateway.total_dispatched} | Chain Height: {total_blocks})",
+                    "rto_gateway_status": (
+                        f"{dispatch_status.replace('_', ' ').upper()} | "
+                        f"{dispatch_count_label} | "
+                        f"Failed: {ap_rto_gateway.failed_dispatches} | Chain Height: {total_blocks}"
+                    ),
                     "district_stats": dict(
                         sorted(self.district_violation_counts.items(), key=lambda item: item[1], reverse=True)[:6]),
                     "recent_violations": self.violation_events[-8:]
