@@ -32,6 +32,73 @@ class ProtectedApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.headers["cache-control"], "no-store")
 
+    def test_removed_quantum_endpoints_are_not_registered(self) -> None:
+        paths = app.openapi()["paths"]
+        self.assertFalse(any(path.startswith("/api/quantum/") for path in paths))
+
+    def test_auth_session_returns_the_authenticated_role(self) -> None:
+        response = self.client.get(
+            "/api/auth/session",
+            headers={"Authorization": f"Bearer {OPERATOR_TOKEN}"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"authenticated": True, "role": "operator"})
+
+    def test_auth_session_rejects_missing_tokens(self) -> None:
+        response = self.client.get("/api/auth/session")
+        self.assertEqual(response.status_code, 401)
+
+    def test_local_demo_mode_allows_protected_http_and_websocket_actions(self) -> None:
+        with patch("src.main.LOCAL_DEMO_NO_AUTH", True), patch.dict(
+            os.environ,
+            {"TRAFFIC_VIEWER_TOKEN": "", "TRAFFIC_OPERATOR_TOKEN": ""},
+        ):
+            response = self.client.get("/api/auth/session")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"authenticated": True, "role": "operator"})
+
+            response = self.client.post("/api/switch_source", params={"source": "sim"})
+            self.assertEqual(response.status_code, 200)
+
+            with self.client.websocket_connect("/ws/telemetry") as websocket:
+                self.assertEqual(
+                    websocket.receive_json(),
+                    {"type": "authenticated", "role": "operator"},
+                )
+
+    def test_auth_failures_include_cors_headers_for_dashboard_origins(self) -> None:
+        for origin in ("http://127.0.0.1:8080", "http://localhost:8080"):
+            with self.subTest(origin=origin):
+                response = self.client.get(
+                    "/api/auth/session",
+                    headers={"Origin": origin, "Authorization": "Bearer invalid-token"},
+                )
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(
+                    response.headers.get("access-control-allow-origin"),
+                    origin,
+                )
+                self.assertEqual(
+                    response.json()["detail"],
+                    "The bearer access token is invalid.",
+                )
+
+    def test_auth_preflight_allows_authorization_header(self) -> None:
+        response = self.client.options(
+            "/api/auth/session",
+            headers={
+                "Origin": "http://127.0.0.1:8080",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers.get("access-control-allow-origin"),
+            "http://127.0.0.1:8080",
+        )
+        self.assertIn("authorization", response.headers.get("access-control-allow-headers", "").lower())
+
     def test_missing_server_tokens_fail_closed_and_health_root_stays_public(self) -> None:
         with patch.dict(
             os.environ,

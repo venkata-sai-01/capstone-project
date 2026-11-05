@@ -89,7 +89,6 @@ representative, labeled traffic footage before operational use.
 | `src/services/integrations.py` | Traffic-domain engines and their data integrations, including vehicle registry, citizen reports, signals, and telemetry. |
 | `src/services/india_vehicle_codes.py` | Local state/union-territory and RTO registration-code identification from `data/india_rto_codes.csv`. |
 | `src/services/pipeline.py` | Video capture, YOLO inference orchestration, safety analysis, annotated frames, and WebRTC video track. |
-| `src/services/quantum.py` | Experimental traffic optimization, registry search, and hazard-classification utilities. |
 | `src/services/traffic.py` | Compatibility exports for traffic types and services from the specialized modules. |
 | `src/web/pages.py` | HTML builders for the browser dashboard and API explorer. |
 | `src/yolo_detector.py` | Ultralytics YOLO26 inference, crop inference, class-wise NMS, and IoU tracking. |
@@ -109,9 +108,8 @@ emergency-vehicle preemption. Several integrations are local simulations or
 sandbox behavior; see the code/configuration before treating a displayed
 integration status as a live connection to a government or emergency service.
 The RTO registry and e-challan flow use local/demo data; SOS records do not
-dispatch to emergency services. The quantum-labelled endpoints are experimental
-local simulations, not quantum-hardware integrations or evidence of a quantum
-speedup. The signal controller is not connected to physical traffic lights.
+dispatch to emergency services. The signal controller is not connected to
+physical traffic lights.
 
 ## Persistence and data layout
 

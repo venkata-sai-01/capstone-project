@@ -1,4 +1,5 @@
 import hmac
+import ipaddress
 import os
 from typing import Optional
 
@@ -49,3 +50,12 @@ def required_role(method: str) -> str:
 
 def role_allows(role: str, required: str) -> bool:
     return role == OPERATOR or (role == VIEWER and required == VIEWER)
+
+
+def is_loopback_host(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False

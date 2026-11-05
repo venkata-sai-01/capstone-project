@@ -44,9 +44,37 @@ class WebPageApiConfigurationTests(unittest.TestCase):
         )
 
         self.assertIn("sessionStorage.setItem('trafficApiToken'", page)
+        self.assertIn("window.setDashboardAccessToken = async ()", page)
+        self.assertIn("Connected as operator", page)
+        self.assertIn("/api/auth/session", page)
+        self.assertIn("operator access is required for this action", page)
+        self.assertIn("onkeydown=\"if(event.key==='Enter') setDashboardAccessToken()\"", page)
         self.assertIn("headers.set('Authorization'", page)
-        self.assertIn("EXPERIMENTAL LOCAL SIMULATION (NO QUANTUM HARDWARE)", page)
         self.assertIn("no government connection", page)
+
+    def test_local_demo_pages_hide_token_prompts_and_enable_operator_controls(self) -> None:
+        dashboard = build_dashboard_page(
+            "http://127.0.0.1:8000",
+            "http://127.0.0.1:8081",
+            local_demo_no_auth=True,
+        )
+        self.assertIn("TRAFFIC_LOCAL_DEMO_NO_AUTH = true", dashboard)
+        self.assertIn("Unauthenticated local-only demo mode is active.", dashboard)
+        self.assertNotIn('id="dashboardAccessToken"', dashboard)
+
+        explorer = build_api_interface_page(
+            {"paths": {}},
+            "http://127.0.0.1:8000",
+            "http://127.0.0.1:8080",
+            local_demo_no_auth=True,
+        ).body.decode("utf-8")
+        self.assertIn("localDemoNoAuth = true", explorer)
+        self.assertNotIn('id="token"', explorer)
+        self.assertIn("Unauthenticated local-only demo mode is active.", explorer)
+        self.assertIn(
+            "const token = localDemoNoAuth ? '' : document.getElementById('token').value.trim();",
+            explorer,
+        )
 
 
 if __name__ == "__main__":

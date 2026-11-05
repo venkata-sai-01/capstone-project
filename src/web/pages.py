@@ -8,7 +8,7 @@ else:
     from config import DASHBOARD_API_INTERFACE_URL, DASHBOARD_API_URL, DASHBOARD_UI_URL
 
 
-def build_api_interface_page(openapi_schema, api_url, dashboard_url):
+def build_api_interface_page(openapi_schema, api_url, dashboard_url, local_demo_no_auth=False):
     schema_json = json.dumps(openapi_schema).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
     api_base_json = json.dumps(api_url)
     dashboard_base_json = json.dumps(dashboard_url)
@@ -80,11 +80,19 @@ def build_api_interface_page(openapi_schema, api_url, dashboard_url):
 const apiSchema = __OPENAPI_SCHEMA__;
 const configuredApiBase = __API_BASE__;
 const configuredDashboardUrl = __DASHBOARD_URL__;
+const localDemoNoAuth = __LOCAL_DEMO_NO_AUTH__;
 const baseInput = document.getElementById('apiBase');
+const tokenInput = document.getElementById('token');
+if (localDemoNoAuth && tokenInput) tokenInput.parentElement.hidden = true;
 baseInput.value = configuredApiBase || window.location.origin;
 document.querySelector('header .button').href = configuredDashboardUrl || window.location.origin;
 document.getElementById('docsLink').href = new URL('/docs', baseInput.value).href;
 document.getElementById('schemaLink').href = new URL('/openapi.json', baseInput.value).href;
+if (localDemoNoAuth) {
+    const notice = document.createElement('p');
+    notice.textContent = 'Unauthenticated local-only demo mode is active.';
+    document.querySelector('.intro').append(notice);
+}
 baseInput.addEventListener('change', () => {
     document.getElementById('docsLink').href = new URL('/docs', baseInput.value).href;
     document.getElementById('schemaLink').href = new URL('/openapi.json', baseInput.value).href;
@@ -234,7 +242,7 @@ function makeCard(item) {
             for (const input of fields.querySelectorAll('input')) {
                 if (input.dataset.location === 'header' && input.value) headers[input.dataset.name] = input.value;
             }
-            const token = document.getElementById('token').value.trim();
+            const token = localDemoNoAuth ? '' : document.getElementById('token').value.trim();
             if (token) headers.Authorization = `Bearer ${token}`;
             const init = {method:method.toUpperCase(), headers};
             if (formFields.length) {
@@ -306,13 +314,13 @@ websocketButton.addEventListener('click', event => {
         websocketResponse.hidden = false;
         websocketResponse.replaceChildren(text('strong', 'Connecting…'));
         socket.addEventListener('open', () => {
-            const token = document.getElementById('token').value.trim();
-            if (!token) {
+            const token = localDemoNoAuth ? '' : document.getElementById('token').value.trim();
+            if (!localDemoNoAuth && !token) {
                 socket.close();
                 websocketResponse.replaceChildren(text('strong', 'Enter a viewer or operator token first.', 'bad'));
                 return;
             }
-            socket.send(JSON.stringify({type:'auth', token}));
+            if (!localDemoNoAuth) socket.send(JSON.stringify({type:'auth', token}));
         }, {once:true});
         socket.addEventListener('message', event => {
             const message = JSON.parse(event.data);
@@ -340,11 +348,19 @@ document.getElementById('search').addEventListener('input', event => {
 </body>
 </html>""".replace("__OPENAPI_SCHEMA__", schema_json).replace("__API_BASE__", api_base_json).replace(
         "__DASHBOARD_URL__", dashboard_base_json
-    )
+    ).replace("__LOCAL_DEMO_NO_AUTH__", json.dumps(local_demo_no_auth))
+    if local_demo_no_auth:
+        token_start = page.index('        <div><label for="token"')
+        token_end = page.index('        <div><label for="search"', token_start)
+        page = (
+            page[:token_start]
+            + '        <div>Unauthenticated local-only demo mode; no API token is required.</div>\n'
+            + page[token_end:]
+        )
     return HTMLResponse(page)
 
 
-def build_dashboard_page(api_url, api_interface_url):
+def build_dashboard_page(api_url, api_interface_url, local_demo_no_auth=False):
     dashboard_html = """<!DOCTYPE html>  
 <html lang="en">  
 <head>  
@@ -461,18 +477,6 @@ def build_dashboard_page(api_url, api_interface_url):
             font-weight: 600;  
             border: 1px solid rgba(139, 92, 246, 0.3);  
         }  
-        .badge-quantum {  
-            display: flex;  
-            align-items: center;  
-            gap: 0.4rem;  
-            background: rgba(6, 182, 212, 0.12);  
-            color: var(--accent-cyan);  
-            padding: 0.4rem 0.8rem;  
-            border-radius: 9999px;  
-            font-size: 0.8rem;  
-            font-weight: 600;  
-            border: 1px solid rgba(6, 182, 212, 0.3);  
-        }  
         .badge-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); animation: pulse 1.5s infinite; }  
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }  
 
@@ -538,7 +542,6 @@ def build_dashboard_page(api_url, api_interface_url):
         .btn-primary:hover { opacity: 0.9; }  
         .btn-secondary { background: #1e293b; color: #e2e8f0; margin-top: 0.5rem; }  
         .btn-sos { background: #ef4444; color: #fff; font-weight: 700; letter-spacing: 0.05em; }  
-        .btn-quantum { background: linear-gradient(135deg, #06b6d4, #8b5cf6); color: #fff; font-weight: 700; }  
 
         .control-row { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.75rem; }  
         .control-row label { font-size: 0.82rem; color: var(--text-muted); display: flex; justify-content: space-between; }  
@@ -680,13 +683,6 @@ def build_dashboard_page(api_url, api_interface_url):
         .registry-search { flex-wrap: nowrap; }
         .registry-search input { flex: 1 1 12rem; min-width: 0; }
         .registry-search .btn-primary { flex: 0 0 auto; }
-        .quantum-grid {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 0.75rem;
-            margin-top: 0.5rem;
-        }
-        .quantum-grid > * { min-width: 0; }
         .detection-item { min-width: 0; overflow-wrap: anywhere; }
         .violation-item { gap: 0.5rem; flex-wrap: wrap; overflow-wrap: anywhere; }
 
@@ -697,7 +693,6 @@ def build_dashboard_page(api_url, api_interface_url):
         @media (max-width: 900px) {
             .system-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .hud-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-            .quantum-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
         @media (max-width: 760px) {
             body { padding: 0.75rem; }
@@ -710,7 +705,7 @@ def build_dashboard_page(api_url, api_interface_url):
             .panel-card { padding: 0.9rem; }
         }
         @media (max-width: 520px) {
-            .system-overview, .quantum-grid { grid-template-columns: minmax(0, 1fr); }
+            .system-overview { grid-template-columns: minmax(0, 1fr); }
             .hud-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .header-badges { align-items: flex-start; flex-direction: column; }
             .panel-title { align-items: flex-start; flex-direction: column; }
@@ -730,11 +725,9 @@ def build_dashboard_page(api_url, api_interface_url):
         <div class="header-badges">  
             <a class="api-explorer-link" href="#" onclick="window.open(window.TRAFFIC_API_INTERFACE_URL, '_blank', 'noopener'); return false;">API EXPLORER</a>
             <label for="dashboardAccessToken" style="color: var(--text-muted); font-size: .75rem;">API token</label>
-            <input id="dashboardAccessToken" type="password" autocomplete="off" placeholder="Viewer or operator token" style="max-width: 190px;">
-            <button type="button" class="api-explorer-link" onclick="setDashboardAccessToken()">Save for this tab</button>
-            <div class="badge-quantum" id="quantumStatusBadge">  
-                ⚛️ EXPERIMENTAL LOCAL SIMULATION (NO QUANTUM HARDWARE)
-            </div>  
+            <input id="dashboardAccessToken" type="password" autocomplete="off" placeholder="Viewer or operator token" onkeydown="if(event.key==='Enter') setDashboardAccessToken()" style="max-width: 190px;">
+            <button type="button" class="api-explorer-link" onclick="setDashboardAccessToken()">Connect</button>
+            <span id="dashboardAccessStatus" role="status" aria-live="polite" style="color: var(--accent-gold); font-size: .75rem;">Connect with the operator token from .env for uploads, streams, and controls. Restart the API after rotating tokens.</span>
             <div class="badge-radar" id="databaseStatusBadge">DATABASE: CHECKING</div>
             <div class="badge-blockchain" id="blockchainStatusBadge">  
                 LOCAL HASH-LINKED LEDGER: CHECKING
@@ -839,33 +832,6 @@ def build_dashboard_page(api_url, api_interface_url):
                 </div>  
             </div>  
 
-            <!-- Quantum Computing Integration Module Dashboard Card -->
-            <div class="panel-card" style="border: 1px solid rgba(6, 182, 212, 0.35); background: linear-gradient(180deg, #0e1320 0%, #08101e 100%);">  
-                <div class="panel-title">  
-                    <span style="color: var(--accent-cyan); display: flex; align-items: center; gap: 0.4rem;">  
-                        ⚛️ Quantum Optimization, Fast Search & Quantum ML Modules  
-                    </span>  
-                    <span style="font-size: 0.75rem; color: var(--accent-purple); font-family: 'JetBrains Mono';">Hybrid Quantum-Edge Suite</span>  
-                </div>  
-                <div class="quantum-grid">  
-                    <div style="background: rgba(6,182,212,0.06); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(6,182,212,0.2);">  
-                        <div style="font-weight: 700; font-size: 0.82rem; color: var(--accent-cyan); margin-bottom: 0.3rem;">Experimental Optimization Demo</div>
-                        <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0 0 0.5rem;">Local experimental optimization demo; not connected to traffic controllers.</p>
-                        <button class="btn-primary btn-quantum" style="font-size: 0.75rem; padding: 0.4rem;" onclick="runQAOAOptimization()">Run QAOA</button>  
-                    </div>  
-                    <div style="background: rgba(139,92,246,0.06); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(139,92,246,0.2);">  
-                        <div style="font-weight: 700; font-size: 0.82rem; color: var(--accent-purple); margin-bottom: 0.3rem;">Classical Local Search Demo</div>
-                        <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0 0 0.5rem;">Classical local search demonstration; no claimed quantum speedup.</p>
-                        <button class="btn-primary" style="background: var(--accent-purple); font-size: 0.75rem; padding: 0.4rem;" onclick="runGroverSearchPrompt()">Run Grover</button>  
-                    </div>  
-                    <div style="background: rgba(16,185,129,0.06); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(16,185,129,0.2);">  
-                        <div style="font-weight: 700; font-size: 0.82rem; color: var(--accent-green); margin-bottom: 0.3rem;">Experimental Hazard Heuristic</div>
-                        <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0 0 0.5rem;">Experimental local heuristic; not validated for enforcement.</p>
-                        <button class="btn-primary" style="background: var(--accent-green); font-size: 0.75rem; padding: 0.4rem;" onclick="runQSVMHazardClassification()">Run QSVM</button>  
-                    </div>  
-                </div>  
-                <div id="quantumOutputCard" style="display:none; margin-top: 0.75rem; padding: 0.7rem; border-radius: 6px; background: #070b14; border: 1px solid var(--surface-border); font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;"></div>  
-            </div>  
         </div>  
 
         <div class="sidebar-panel">  
@@ -874,7 +840,7 @@ def build_dashboard_page(api_url, api_interface_url):
                 <div class="status-badge" id="rtoStatusText">e-Challan: Sandbox simulation; no government connection</div>
                 <div class="upload-box" onclick="document.getElementById('videoFileInput').click()">  
                     <span id="uploadStatusText">Upload Video File (MP4/AVI)</span>  
-                    <input type="file" id="videoFileInput" accept="video/*" style="display:none" onchange="uploadVideoFile()">  
+                    <input type="file" id="videoFileInput" accept=".mp4,.avi,.mov,.mkv,video/mp4,video/x-msvideo,video/quicktime,video/x-matroska" style="display:none" onchange="uploadVideoFile()">
                 </div>  
                 <div class="action-row">  
                     <button class="btn-primary" style="font-size:0.85rem;" onclick="switchSourceMode('0')">Use Camera</button>  
@@ -984,9 +950,10 @@ def build_dashboard_page(api_url, api_interface_url):
                 if (!response.ok) throw new Error('Overview request failed');
                 const overview = await response.json();
                 document.getElementById('overviewAiStack').innerText = 'YOLO / Edge Vision';
-                document.getElementById('overviewAiStatus').innerText = overview.status === 'operational' ? 'Operational' : 'Degraded';
+                document.getElementById('overviewAiStatus').innerText =
+                    overview.deployment_class === 'local_prototype' ? 'Prototype running' : 'Operational';
                 document.getElementById('overviewSignalMode').innerText = overview.system_summary?.adaptive_signal ? 'Adaptive' : 'Manual';
-                document.getElementById('overviewSignalStatus').innerText = overview.system_summary?.adaptive_signal ? 'Green cycle online' : 'Override enabled';
+                document.getElementById('overviewSignalStatus').innerText = 'Local simulation only';
                 const riskLevel = document.getElementById('valRisk').innerText || '0%';
                 document.getElementById('overviewRiskLevel').innerText = riskLevel;
                 document.getElementById('overviewRiskStatus').innerText = riskLevel.includes('70') || riskLevel.includes('80') || riskLevel.includes('90') ? 'Alert window active' : 'Predictive engine stable';
@@ -1180,16 +1147,18 @@ def build_dashboard_page(api_url, api_interface_url):
         }
 
         function initWebSocket() {  
-            if (!window.TRAFFIC_AUTH_TOKEN) return;
+            if (!window.TRAFFIC_AUTH_TOKEN && !window.TRAFFIC_LOCAL_DEMO_NO_AUTH) return;
             try {  
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';  
                 ws = new WebSocket(protocol + '//' + window.location.host + '/ws/telemetry');  
                 window.dashboardTelemetrySocket = ws;
                 ws.onopen = () => {
-                    ws.send(JSON.stringify({
-                        type: 'auth',
-                        token: window.TRAFFIC_AUTH_TOKEN || ''
-                    }));
+                    if (!window.TRAFFIC_LOCAL_DEMO_NO_AUTH) {
+                        ws.send(JSON.stringify({
+                            type: 'auth',
+                            token: window.TRAFFIC_AUTH_TOKEN || ''
+                        }));
+                    }
                 };
                 ws.onmessage = (event) => {  
                     try {
@@ -1200,7 +1169,7 @@ def build_dashboard_page(api_url, api_interface_url):
                     }
                 };  
                 ws.onclose = () => {
-                    if (window.TRAFFIC_AUTH_TOKEN) setTimeout(initWebSocket, 4000);
+                    if (window.TRAFFIC_AUTH_TOKEN || window.TRAFFIC_LOCAL_DEMO_NO_AUTH) setTimeout(initWebSocket, 4000);
                 };
                 ws.onerror = () => { ws.close(); };  
             } catch (error) {
@@ -1209,7 +1178,7 @@ def build_dashboard_page(api_url, api_interface_url):
             }
         }  
         window.startDashboardTelemetry = initWebSocket;
-        if (window.TRAFFIC_AUTH_TOKEN) initWebSocket();
+        if (window.TRAFFIC_AUTH_TOKEN || window.TRAFFIC_LOCAL_DEMO_NO_AUTH) initWebSocket();
 
         async function toggleStream() {  
             const btn = document.getElementById('streamBtn');  
@@ -1272,7 +1241,10 @@ def build_dashboard_page(api_url, api_interface_url):
                         type: connection.localDescription.type
                     })
                 });
-                if (!resp.ok) throw new Error(`WebRTC signaling failed with HTTP ${resp.status}`);
+                if (!resp.ok) {
+                    const result = await resp.json().catch(() => ({}));
+                    throw new Error(result.detail || `WebRTC signaling failed with HTTP ${resp.status}`);
+                }
                 await connection.setRemoteDescription(await resp.json());
 
                 btn.disabled = false;
@@ -1326,14 +1298,27 @@ def build_dashboard_page(api_url, api_interface_url):
             formData.append('file', file);  
             document.getElementById('uploadStatusText').innerText = "Uploading " + file.name + "...";  
 
-            const resp = await fetch('/api/upload_video', { method: 'POST', body: formData });  
-            const res = await resp.json();  
-            document.getElementById('uploadStatusText').innerText = res.status === 'ok' ? "Active: " + file.name : "Upload failed.";  
+            try {
+                const resp = await fetch('/api/upload_video', { method: 'POST', body: formData });
+                const result = await resp.json();
+                if (!resp.ok) throw new Error(result.detail || `Upload failed (HTTP ${resp.status}).`);
+                document.getElementById('uploadStatusText').innerText = "Active: " + file.name;
+            } catch (error) {
+                document.getElementById('uploadStatusText').innerText = error.message || 'Upload failed.';
+            } finally {
+                input.value = '';
+            }
         }  
 
         async function switchSourceMode(mode) {  
-            await fetch('/api/switch_source?source=' + encodeURIComponent(mode), { method: 'POST' });  
-            document.getElementById('uploadStatusText').innerText = mode === '0' ? "Live Camera Active" : "Simulator Active";  
+            try {
+                const response = await fetch('/api/switch_source?source=' + encodeURIComponent(mode), { method: 'POST' });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || `Source change failed (HTTP ${response.status}).`);
+                document.getElementById('uploadStatusText').innerText = mode === '0' ? "Live Camera Active" : "Simulator Active";
+            } catch (error) {
+                document.getElementById('uploadStatusText').innerText = error.message || 'Source change failed.';
+            }
         }  
 
         async function searchVahanRegistry() {  
@@ -1431,94 +1416,92 @@ def build_dashboard_page(api_url, api_interface_url):
             }
         }  
 
-        // Quantum Functions
-        async function runQAOAOptimization() {
-            const outBox = document.getElementById('quantumOutputCard');
-            outBox.style.display = 'block';
-            outBox.innerHTML = '<span style="color:var(--accent-cyan);">Running local statevector optimization demo...</span>';
-            const resp = await fetch('/api/quantum/qaoa_optimize', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ corridor_congestion: [4.2, 8.5, 3.1, 7.8], p_layers: 2 })
-            });
-            const res = await resp.json();
-            outBox.innerHTML = `
-                <div style="color:var(--accent-cyan); font-weight:700;">EXPERIMENTAL STATEVECTOR SIMULATION RESULTS:</div>
-                <div>Status: ${res.status} | Ground Energy: ${res.ground_energy}</div>
-                <div>Optimal Bitstring: <strong>[${res.optimal_bitstring.join(', ')}]</strong> (State Index: ${res.optimal_state_index})</div>
-                <div>Quantum Fidelity: <strong>${(res.quantum_fidelity * 100).toFixed(1)}%</strong></div>
-                <div>Optimized Green Times: [${res.green_allocations_sec.join('s, ')}s]</div>
-                <div>Priority Intercept Nodes: ${res.patrol_intercept_nodes.join(' | ')}</div>
-            `;
-        }
-
-        async function runGroverSearchPrompt() {
-            const plate = prompt("Enter a plate to look up in the local demo registry:", "AP 03 BK 4921");
-            if (!plate) return;
-            const outBox = document.getElementById('quantumOutputCard');
-            outBox.style.display = 'block';
-            outBox.innerHTML = `<span style="color:var(--accent-purple);">Running local classical statevector search demo...</span>`;
-            const resp = await fetch('/api/quantum/grover_search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ target_plate: plate })
-            });
-            const res = await resp.json();
-            outBox.innerHTML = `
-                <div style="color:var(--accent-purple); font-weight:700;">LOCAL SEARCH DEMO COMPLETE:</div>
-                <div>Target Matched: <strong>${res.matched_record.plate}</strong> (${res.matched_record.owner_name})</div>
-                <div>Simulated statevector dimension: N = ${res.database_size} | Simulation iterations: ${res.quantum_iterations_required}</div>
-                <div>Measured hardware speedup: <strong>None; this is a classical simulation.</strong></div>
-                <div>Measurement Probability: <strong>${(res.success_probability * 100).toFixed(1)}%</strong></div>
-                <div>Registered DTO: ${res.matched_record.dto_office} | FASTag: ${res.matched_record.fastag_id}</div>
-            `;
-        }
-
-        async function runQSVMHazardClassification() {
-            const outBox = document.getElementById('quantumOutputCard');
-            outBox.style.display = 'block';
-            outBox.innerHTML = '<span style="color:var(--accent-green);">Running experimental local kernel heuristic...</span>';
-            const resp = await fetch('/api/quantum/qsvm_hazard_classify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ speed_kmh: 88.5, lateral_drift_px: 48.0, gap_m: 6.5, sound_db: 96.0 })
-            });
-            const res = await resp.json();
-            outBox.innerHTML = `
-                <div style="color:var(--accent-green); font-weight:700;">UNVALIDATED LOCAL HEURISTIC RESULT:</div>
-                <div>Hazard Prediction: <strong style="color:var(--accent-red);">${res.predicted_category}</strong></div>
-                <div>Confidence Score: <strong>${(res.quantum_confidence * 100).toFixed(1)}%</strong></div>
-                <div>Quantum Kernel Alignment: K(x, centroid) = ${res.quantum_kernel_similarity}</div>
-                <div>HHL Linear System Solver: ${res.hhl_status} (Condition Number κ: ${res.matrix_condition_number})</div>
-                <div>Enforcement Recommendation: ${res.recommended_action}</div>
-            `;
-        }
     </script>  
 </body>  
 </html>  
 """
+    if local_demo_no_auth:
+        access_start = dashboard_html.index('            <label for="dashboardAccessToken"')
+        access_end = dashboard_html.index('            <div class="badge-radar" id="databaseStatusBadge"', access_start)
+        dashboard_html = (
+            dashboard_html[:access_start]
+            + '            <span id="dashboardAccessStatus" role="status">UNAUTHENTICATED LOCAL-ONLY DEMO — no API token required.</span>\n'
+            + dashboard_html[access_end:]
+        )
     dashboard_bootstrap = f"""<script>
 window.TRAFFIC_API_BASE = {json.dumps(api_url)} || window.location.origin;
 window.TRAFFIC_API_INTERFACE_URL = {json.dumps(api_interface_url)};
 window.TRAFFIC_AUTH_TOKEN = sessionStorage.getItem('trafficApiToken') || '';
-window.setDashboardAccessToken = () => {{
-    const input = document.getElementById('dashboardAccessToken');
-    window.TRAFFIC_AUTH_TOKEN = input.value.trim();
-    if (window.TRAFFIC_AUTH_TOKEN) {{
-        sessionStorage.setItem('trafficApiToken', window.TRAFFIC_AUTH_TOKEN);
-    }} else {{
-        sessionStorage.removeItem('trafficApiToken');
+window.TRAFFIC_AUTH_ROLE = '';
+window.TRAFFIC_LOCAL_DEMO_NO_AUTH = {json.dumps(local_demo_no_auth)};
+window.setDashboardAccessMessage = (message, isError = false) => {{
+    const status = document.getElementById('dashboardAccessStatus');
+    if (status) {{
+        status.textContent = message;
+        status.style.color = isError ? 'var(--accent-red)' : 'var(--accent-gold)';
     }}
-    const socket = window.dashboardTelemetrySocket;
-    if (socket && socket.readyState < WebSocket.CLOSING) {{
-        socket.close();
-    }} else if (window.TRAFFIC_AUTH_TOKEN && window.startDashboardTelemetry) {{
-        window.startDashboardTelemetry();
+}};
+window.setDashboardAccessToken = async () => {{
+    if (window.TRAFFIC_LOCAL_DEMO_NO_AUTH) return;
+    const input = document.getElementById('dashboardAccessToken');
+    const token = input.value.trim();
+    if (!token) {{
+        window.TRAFFIC_AUTH_TOKEN = '';
+        window.TRAFFIC_AUTH_ROLE = '';
+        sessionStorage.removeItem('trafficApiToken');
+        window.setDashboardAccessMessage('Enter the viewer or operator token from the project .env file.', true);
+        if (window.dashboardTelemetrySocket) window.dashboardTelemetrySocket.close();
+        return;
+    }}
+    window.setDashboardAccessMessage('Checking token with the API…');
+    try {{
+        const headers = new Headers({{Authorization: `Bearer ${{token}}`}});
+        const response = await dashboardFetch(new URL('/api/auth/session', window.TRAFFIC_API_BASE), {{headers, cache: 'no-store'}});
+        if (!response.ok) {{
+            const result = await response.json().catch(() => ({{}}));
+            throw new Error(result.detail || `The API rejected the token (HTTP ${{response.status}}). Restart the app if you generated tokens while it was running.`);
+        }}
+        const session = await response.json();
+        window.TRAFFIC_AUTH_TOKEN = token;
+        window.TRAFFIC_AUTH_ROLE = session.role;
+        sessionStorage.setItem('trafficApiToken', token);
+        window.setDashboardAccessMessage(
+            session.role === 'operator'
+                ? 'Connected as operator. Protected reads and controls are enabled.'
+                : 'Connected as viewer. Reads are enabled; use the operator token for uploads, streams, and controls.'
+        );
+        if (window.dashboardTelemetrySocket) window.dashboardTelemetrySocket.close();
+        else if (window.startDashboardTelemetry) window.startDashboardTelemetry();
+    }} catch (error) {{
+        window.TRAFFIC_AUTH_TOKEN = '';
+        window.TRAFFIC_AUTH_ROLE = '';
+        sessionStorage.removeItem('trafficApiToken');
+        window.setDashboardAccessMessage(error.message || 'Could not authenticate with the API.', true);
+        if (window.dashboardTelemetrySocket) window.dashboardTelemetrySocket.close();
     }}
 }};
 document.addEventListener('DOMContentLoaded', () => {{
-    const input = document.getElementById('dashboardAccessToken');
-    if (input) input.value = window.TRAFFIC_AUTH_TOKEN;
+    if (window.TRAFFIC_LOCAL_DEMO_NO_AUTH) {{
+        window.TRAFFIC_AUTH_TOKEN = '';
+        window.TRAFFIC_AUTH_ROLE = 'operator';
+        sessionStorage.removeItem('trafficApiToken');
+        const input = document.getElementById('dashboardAccessToken');
+        if (input) {{
+            input.hidden = true;
+            input.previousElementSibling.hidden = true;
+            input.nextElementSibling.hidden = true;
+        }}
+        window.setDashboardAccessMessage('Unauthenticated local-only demo mode is active.');
+        if (window.startDashboardTelemetry) window.startDashboardTelemetry();
+    }} else {{
+        const input = document.getElementById('dashboardAccessToken');
+        if (input) input.value = window.TRAFFIC_AUTH_TOKEN;
+        if (window.TRAFFIC_AUTH_TOKEN) {{
+            window.setDashboardAccessToken();
+        }} else {{
+            window.setDashboardAccessMessage('Connect with the operator token from .env for uploads, streams, and controls. Restart the API after rotating tokens.');
+        }}
+    }}
 }});
 const dashboardFetch = window.fetch.bind(window);
 window.fetch = (input, init) => {{
@@ -1528,10 +1511,49 @@ window.fetch = (input, init) => {{
     const requestUrl = input instanceof Request ? input.url : String(input);
     const headers = new Headers(init && init.headers || (input instanceof Request ? input.headers : undefined));
     const apiOrigin = new URL(window.TRAFFIC_API_BASE).origin;
-    if (new URL(requestUrl, window.location.href).origin === apiOrigin && window.TRAFFIC_AUTH_TOKEN) {{
+    const target = new URL(requestUrl, window.location.href);
+    const isApiRequest = target.origin === apiOrigin;
+    const isPublicRequest = ['/', '/api/health', '/api/system/overview'].includes(target.pathname);
+    const method = (init && init.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+    if (isApiRequest && !isPublicRequest && !window.TRAFFIC_LOCAL_DEMO_NO_AUTH && !window.TRAFFIC_AUTH_TOKEN) {{
+        window.setDashboardAccessMessage('Access required. Enter a token from .env and click Connect; operator access is required for this action.', true);
+        return Promise.resolve(new Response(JSON.stringify({{detail: 'Connect with a viewer or operator token first.'}}), {{
+            status: 401,
+            headers: {{'Content-Type': 'application/json'}}
+        }}));
+    }}
+    if (isApiRequest && !isPublicRequest && !window.TRAFFIC_LOCAL_DEMO_NO_AUTH && method !== 'GET' && window.TRAFFIC_AUTH_ROLE !== 'operator') {{
+        window.setDashboardAccessMessage('This action requires an operator token. Connect with the operator token from .env.', true);
+        return Promise.resolve(new Response(JSON.stringify({{detail: 'Operator access is required.'}}), {{
+            status: 403,
+            headers: {{'Content-Type': 'application/json'}}
+        }}));
+    }}
+    if (isApiRequest && !isPublicRequest && window.TRAFFIC_AUTH_TOKEN) {{
         headers.set('Authorization', `Bearer ${{window.TRAFFIC_AUTH_TOKEN}}`);
     }}
-    return dashboardFetch(input, {{...init, headers}});
+    return dashboardFetch(input, {{...init, headers}}).then(async response => {{
+        if (isApiRequest && (response.status === 401 || response.status === 403)) {{
+            let detail = `The API rejected this request (HTTP ${{response.status}}).`;
+            try {{
+                const body = await response.clone().json();
+                if (body.detail) detail = body.detail;
+            }} catch {{}}
+            window.setDashboardAccessMessage(
+                `${{detail}} Check the token role and restart the API if credentials were changed while it was running.`,
+                true
+            );
+            if (response.status === 401) {{
+                window.TRAFFIC_AUTH_TOKEN = '';
+                window.TRAFFIC_AUTH_ROLE = '';
+                sessionStorage.removeItem('trafficApiToken');
+                const tokenInput = document.getElementById('dashboardAccessToken');
+                if (tokenInput) tokenInput.value = '';
+                if (window.dashboardTelemetrySocket) window.dashboardTelemetrySocket.close();
+            }}
+        }}
+        return response;
+    }});
 }};
 const DashboardWebSocket = window.WebSocket;
 window.WebSocket = class extends DashboardWebSocket {{

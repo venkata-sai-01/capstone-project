@@ -38,6 +38,7 @@ if __package__:
         OPERATOR,
         PUBLIC_HTTP_PATHS,
         authenticate_token,
+        is_loopback_host,
         required_role,
         role_allows,
     )
@@ -49,6 +50,7 @@ else:
         OPERATOR,
         PUBLIC_HTTP_PATHS,
         authenticate_token,
+        is_loopback_host,
         required_role,
         role_allows,
     )
@@ -81,11 +83,6 @@ if __package__:
         ap_rto_gateway, vahan_db, timeseries_logger, acoustic_radar, hsrp_engine,
         evpp_engine, weather_engine, emission_auditor,
     )
-    from src.services.quantum import (
-        GroversVehicleDatabaseSearchEngine, QuantumMLHazardClassifier,
-        TrafficQAOAOptimizer, grover_search_engine, qaoa_optimizer,
-        qsvm_classifier,
-    )
     from src.web.pages import build_api_interface_page, build_dashboard_page
 else:
     from config import (
@@ -111,11 +108,6 @@ else:
         predictive_engine, smart_signal, citizen_portal, ap_cctns_radar,
         ap_rto_gateway, vahan_db, timeseries_logger, acoustic_radar, hsrp_engine,
         evpp_engine, weather_engine, emission_auditor,
-    )
-    from services.quantum import (
-        GroversVehicleDatabaseSearchEngine, QuantumMLHazardClassifier,
-        TrafficQAOAOptimizer, grover_search_engine, qaoa_optimizer,
-        qsvm_classifier,
     )
     from web.pages import build_api_interface_page, build_dashboard_page
 
@@ -191,14 +183,9 @@ app = FastAPI(
     lifespan=lifespan)
 dashboard_app = FastAPI(title="Traffic Safety Dashboard", docs_url=None, openapi_url=None)
 api_interface_app = FastAPI(title="Traffic Safety API Explorer", docs_url=None, openapi_url=None)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=DASHBOARD_ORIGINS,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 MAX_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024
 ALLOWED_VIDEO_EXTENSIONS = {".avi", ".mkv", ".mov", ".mp4"}
+LOCAL_DEMO_NO_AUTH = False
 ALLOWED_VIDEO_CONTENT_TYPES = {
     "application/octet-stream",
     "video/mp4",
@@ -243,6 +230,9 @@ async def api_authentication_middleware(request: Request, call_next):
         return await call_next(request)
     if path != "/offer" and not path.startswith("/api/"):
         return await call_next(request)
+    if LOCAL_DEMO_NO_AUTH:
+        request.state.authenticated_role = OPERATOR
+        return await call_next(request)
 
     authorization = request.headers.get("authorization", "")
     scheme, _, token = authorization.partition(" ")
@@ -285,6 +275,14 @@ async def api_authentication_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=DASHBOARD_ORIGINS,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 @app.websocket("/ws/telemetry")
 async def websocket_telemetry(websocket: WebSocket):
     origin = websocket.headers.get("origin")
@@ -292,26 +290,31 @@ async def websocket_telemetry(websocket: WebSocket):
         await websocket.close(code=4403, reason="WebSocket origin is not allowed.")
         return
     await websocket.accept()
+    if LOCAL_DEMO_NO_AUTH:
+        role = OPERATOR
+    else:
+        role = None
     try:
-        try:
-            auth_message = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
-        except asyncio.TimeoutError:
-            await websocket.close(code=4401, reason="Authentication timed out.")
-            return
-        try:
-            auth_data = json.loads(auth_message)
-        except json.JSONDecodeError:
-            await websocket.close(code=4401, reason="Authentication is required.")
-            return
-        try:
-            role = (
-                authenticate_token(auth_data.get("token"))
-                if isinstance(auth_data, dict) and auth_data.get("type") == "auth"
-                else None
-            )
-        except AuthenticationConfigurationError:
-            await websocket.close(code=1011, reason="Access control is not configured.")
-            return
+        if role is None:
+            try:
+                auth_message = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+            except asyncio.TimeoutError:
+                await websocket.close(code=4401, reason="Authentication timed out.")
+                return
+            try:
+                auth_data = json.loads(auth_message)
+            except json.JSONDecodeError:
+                await websocket.close(code=4401, reason="Authentication is required.")
+                return
+            try:
+                role = (
+                    authenticate_token(auth_data.get("token"))
+                    if isinstance(auth_data, dict) and auth_data.get("type") == "auth"
+                    else None
+                )
+            except AuthenticationConfigurationError:
+                await websocket.close(code=1011, reason="Access control is not configured.")
+                return
         if role is None:
             await websocket.close(code=4401, reason="Invalid access token.")
             return
@@ -383,13 +386,11 @@ def _system_overview() -> Dict[str, Any]:
             "adaptive_signal": smart_signal.adaptive_mode,
             "hotlist_status": "local_demo_data",
             "weather_engine": "frame_heuristic",
-            "quantum_layer": "experimental_local_simulation",
         },
         "external_integrations": {
             "government_registry": "not_connected_local_demo_data",
             "e_challan_dispatch": ap_rto_gateway.dispatch_status,
             "emergency_services": "not_connected",
-            "quantum_hardware": "not_connected",
         },
     }
 
@@ -397,6 +398,14 @@ def _system_overview() -> Dict[str, Any]:
 @app.get("/api/health")
 async def api_health():
     return JSONResponse(await asyncio.to_thread(_database_health_check))
+
+
+@app.get("/api/auth/session")
+async def api_auth_session(request: Request):
+    role = getattr(request.state, "authenticated_role", None)
+    if role is None:
+        raise HTTPException(status_code=401, detail="A valid access token is required.")
+    return JSONResponse({"authenticated": True, "role": role})
 
 
 @app.get("/api/system/overview")
@@ -418,7 +427,10 @@ async def api_detections():
 
 @api_interface_app.get("/", response_class=HTMLResponse)
 async def api_interface():
-    return build_api_interface_page(app.openapi(), DASHBOARD_API_URL, DASHBOARD_UI_URL)
+    return build_api_interface_page(
+        app.openapi(), DASHBOARD_API_URL, DASHBOARD_UI_URL,
+        local_demo_no_auth=LOCAL_DEMO_NO_AUTH,
+    )
 
 
 @app.get("/api-interface", include_in_schema=False)
@@ -428,7 +440,10 @@ async def api_interface_redirect():
 
 @dashboard_app.get("/", response_class=HTMLResponse)
 async def index():
-    return build_dashboard_page(DASHBOARD_API_URL, DASHBOARD_API_INTERFACE_URL)
+    return build_dashboard_page(
+        DASHBOARD_API_URL, DASHBOARD_API_INTERFACE_URL,
+        local_demo_no_auth=LOCAL_DEMO_NO_AUTH,
+    )
 
 
 # ===========================================================================
@@ -661,75 +676,6 @@ async def api_carbon_audit():
     return JSONResponse(emission_auditor.get_corridor_emission_summary())
 
 
-# ===========================================================================
-# 21. Quantum REST API Endpoints
-# ===========================================================================
-
-@app.post("/api/quantum/qaoa_optimize")
-async def api_quantum_qaoa_optimize(request: Request):
-    """Runs a local statevector optimization demo; it does not control traffic signals."""
-    try:
-        data = await request.json()
-        congestion = data.get("corridor_congestion", [4.5, 7.8, 3.2, 8.9])
-        p_layers = data.get("p_layers", 2)
-        opt = TrafficQAOAOptimizer(p_layers=p_layers)
-        result = await asyncio.to_thread(opt.optimize_corridor_flow, congestion_weights=congestion)
-        return JSONResponse(result)
-    except Exception as e:
-        print(f"Error in /api/quantum/qaoa_optimize: {e}")
-        return JSONResponse({"status": "error", "message": "An internal error occurred."}, status_code=500)
-
-
-@app.post("/api/quantum/grover_search")
-async def api_quantum_grover_search(request: Request):
-    """Runs a local classical statevector search demo against bundled registry data."""
-    try:
-        data = await request.json()
-        target_plate = data.get("target_plate", "AP 03 BK 4921")
-        result = await asyncio.to_thread(grover_search_engine.quantum_search_plate, target_plate=target_plate)
-        return JSONResponse(result)
-    except Exception as e:
-        print(f"Error in /api/quantum/grover_search: {e}")
-        return JSONResponse({"status": "error", "message": "An internal error occurred."}, status_code=500)
-
-
-@app.post("/api/quantum/qsvm_hazard_classify")
-async def api_quantum_qsvm_classify(request: Request):
-    """Runs an experimental local heuristic on telemetry; it is not validated for enforcement."""
-    try:
-        data = await request.json()
-        spd = float(data.get("speed_kmh", 85.0))
-        drift = float(data.get("lateral_drift_px", 42.0))
-        gap = float(data.get("gap_m", 8.0))
-        db = float(data.get("sound_db", 92.0))
-        result = await asyncio.to_thread(
-            qsvm_classifier.classify_hazard,
-            speed_kmh=spd,
-            lateral_drift_px=drift,
-            gap_m=gap,
-            sound_db=db
-        )
-        return JSONResponse(result)
-    except Exception as e:
-        print(f"Error in /api/quantum/qsvm_hazard_classify: {e}")
-        return JSONResponse({"status": "error", "message": "An internal error occurred."}, status_code=500)
-
-
-@app.get("/api/quantum/status")
-async def api_quantum_status():
-    """Returns the operational status of all three quantum computing modules."""
-    return JSONResponse({
-        "status": "EXPERIMENTAL_LOCAL_SIMULATION",
-        "quantum_hardware_connected": False,
-        "production_validated": False,
-        "modules": {
-            "QAOA": "Experimental local optimization simulation; no quantum hardware connection",
-            "Grover_Search": "Experimental local classical search demonstration; no claimed quadratic speedup",
-            "QSVM_HHL": "Experimental local heuristic; not a validated quantum classifier or HHL deployment",
-        }
-    })
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Real-Time Multi-Hazard Traffic Surveillance and Automated e-Challan System using Edge YOLO and WebRTC",
@@ -745,6 +691,11 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8000, help="REST API port")
     parser.add_argument("--dashboard-port", type=int, default=8080, help="Dashboard web port")
     parser.add_argument("--api-interface-port", type=int, default=8081, help="API Explorer web port")
+    parser.add_argument(
+        "--local-demo-no-auth",
+        action="store_true",
+        help="Disable API tokens for a local-only demo; requires a loopback --host.",
+    )
     parser.add_argument("--env", type=str, default="SANDBOX", choices=["SANDBOX", "PRODUCTION"],
                         help="RTO Server Environment")
     args = parser.parse_args()
@@ -759,9 +710,12 @@ if __name__ == "__main__":
         DASHBOARD_ORIGINS.append(DASHBOARD_API_INTERFACE_URL)
     if len({args.port, args.dashboard_port, args.api_interface_port}) != 3:
         parser.error("--port, --dashboard-port, and --api-interface-port must all be different.")
+    if args.local_demo_no_auth and not is_loopback_host(args.host):
+        parser.error("--local-demo-no-auth requires --host to be localhost or a loopback IP.")
 
     VIDEO_SRC = int(args.source) if args.source.isdigit() else args.source
     MODEL_PATH = args.model if os.path.isabs(args.model) else _project_path(args.model)
+    LOCAL_DEMO_NO_AUTH = args.local_demo_no_auth
     ap_rto_gateway.env = args.env
     ap_rto_gateway.dispatch_status = (
         "sandbox_simulation" if args.env == "SANDBOX" else "configuration_required"
@@ -772,6 +726,10 @@ if __name__ == "__main__":
     print(f" Web Dashboard:     {DASHBOARD_UI_URL}")
     print(f" API Explorer:      {DASHBOARD_API_INTERFACE_URL}")
     print(f" REST API:          {DASHBOARD_API_URL} (docs: {DASHBOARD_API_URL}/docs)")
+    print(
+        " API access:        "
+        + ("UNAUTHENTICATED LOCAL-ONLY DEMO" if LOCAL_DEMO_NO_AUTH else "bearer tokens required")
+    )
     print(
         f" Environment:       {args.env} (RTO dispatch: "
         f"{ap_rto_gateway.dispatch_status.replace('_', ' ')})"

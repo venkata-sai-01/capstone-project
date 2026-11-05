@@ -61,11 +61,25 @@ the ignored local `.env` file:
 .\.venv\Scripts\python.exe scripts\configure_api_access.py
 ```
 
+Restart the API process after generating or rotating tokens so it reloads the
+local `.env`. On the browser dashboard, paste the operator token into the
+**API token** field and click **Connect**. Wait for “Connected as operator”
+before uploading video, starting WebRTC, switching video sources, or changing
+traffic settings. A viewer token only allows protected read requests. The
+dashboard now checks the token before enabling authenticated requests and
+displays the API's error instead of sending unauthenticated actions.
+
 Copy the appropriate token from `.env` into the browser dashboard, API
-Explorer, or read-only Streamlit viewer. Keep `.env` private; never paste tokens into
-source control, screenshots, issue trackers, or chat. Re-run the setup script
+Explorer, or read-only Streamlit viewer. Keep `.env` private; never paste
+tokens into source control, screenshots, issue trackers, or chat. Re-run the setup script
 to rotate both tokens. These are shared role tokens, not individual accounts;
 there is no per-user identity, revocation, or audit trail.
+
+For a local demonstration only, token prompts can be disabled with
+`--local-demo-no-auth`. The option is rejected unless `--host` is `localhost`
+or a loopback IP, and it disables authentication for local API actions. Never
+use it on a network-accessible host; normal token authentication remains
+enabled by default.
 
 Uploads require an operator token, an MP4/AVI/MOV/MKV extension and video
 content type, a decodable frame, and are limited to 500 MiB. Evidence and
@@ -301,6 +315,12 @@ Run the main FastAPI traffic safety system:
 It prints the web dashboard, API explorer, and REST API URLs in the terminal.
 Use `Ctrl+C` in that terminal to stop it.
 
+To run without token prompts on this computer only:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.main --local-demo-no-auth
+```
+
 The separate read-only Streamlit viewer for the local database and violation
 records can be started with:
 
@@ -329,7 +349,6 @@ CAPSTONE PROJECT/
 │   │   ├── india_vehicle_codes.py  State/UT and RTO registration-code lookup
 │   │   ├── pipeline.py      Video capture, inference, and safety analysis
 │   │   ├── traffic.py       Compatibility exports for traffic services
-│   │   └── quantum.py       Experimental optimization and classification
 │   ├── web/
 │   │   └── pages.py         Dashboard and API-explorer HTML
 │   ├── yolo_detector.py     YOLO inference and tracking
