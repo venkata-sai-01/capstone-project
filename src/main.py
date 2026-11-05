@@ -248,9 +248,9 @@ async def api_authentication_middleware(request: Request, call_next):
         )
     try:
         role = authenticate_token(token.strip())
-    except AuthenticationConfigurationError as error:
+    except AuthenticationConfigurationError:
         return JSONResponse(
-            {"detail": str(error)},
+            {"detail": "Authentication service is temporarily unavailable."},
             status_code=503,
             headers={"Cache-Control": "no-store"},
         )
