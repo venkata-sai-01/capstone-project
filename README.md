@@ -97,39 +97,101 @@ relevant transport department before using it for enforcement or legal
 decisions. Vehicle owner and status details in the local registry remain
 simulated unless connected to an authorized data source.
 
+## Collect real-world traffic data
+
+The included `assets/models/yolo26n.pt` is a general COCO-pretrained detector;
+it is not trained on this project's road-camera footage. The local databases,
+violation CSV, and evidence images are application records, not a labeled
+object-detection dataset. To build project-specific evaluation data, collect
+traffic videos and create human-reviewed bounding-box labels.
+
+1. **Choose a permitted source.** Prefer videos recorded with a camera or
+   dashcam you are authorized to use, especially footage from a camera angle
+   similar to the one this project will process. Public sources such as
+   [India Driving Dataset (IDD)](https://idd.insaan.iiit.ac.in/),
+   [BDD100K](https://bdd-data.berkeley.edu/), and
+   [UA-DETRAC](https://detrac-db.rit.albany.edu/) may also be useful. Before
+   downloading or using any source, check its current access rules, license,
+   attribution requirements, and permitted use. These datasets may provide
+   images and labels rather than videos, and their labels are not guaranteed
+   to match this project's format or classes.
+2. **Protect privacy and preserve provenance.** Only collect or retain footage
+   when you have permission and a lawful basis. Road video may contain faces
+   and number plates; restrict access, avoid publishing raw footage, and follow
+   applicable privacy rules. Keep a note of each source, capture date, camera
+   conditions, and any usage restrictions. Do not treat simulated registry
+   entries or violation records as verified ground truth.
+3. **Copy video files into the project.** Put authorized local videos in
+   `uploads\videos`, then check their names:
+
+   ```powershell
+   Get-ChildItem .\uploads\videos -File
+   ```
+
+   The project's preparation tool accepts video file paths; it does not
+   download public datasets or convert arbitrary dataset annotation formats.
+   The video must be readable by OpenCV. Use distinct video filenames within
+   each split because sampled image names are derived from the video filename.
+4. **Separate source videos into splits before sampling.** Use different
+   recordings for training, validation, and test. Do not put frames from the
+   same recording in multiple splits; nearby frames are too similar and can
+   make the test score misleading. For a first trial, sample a manageable
+   number of frames from several different recordings, then inspect the images
+   and increase coverage for underrepresented conditions such as night, rain,
+   distant vehicles, and crowded roads.
+5. **Sample frames using the project tool.** Replace the example paths with
+   your actual filenames. Repeat each option to add more videos to that split:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m scripts.prepare_yolo_dataset `
+     --train-video "uploads\videos\train_day.mp4" `
+     --train-video "uploads\videos\train_night.mp4" `
+     --val-video "uploads\videos\validation.mp4" `
+     --test-video "uploads\videos\heldout_test.mp4" `
+     --frames-per-video 100
+   ```
+
+   The tool samples approximately evenly spaced frames into
+   `datasets\traffic\images\{train,val,test}`. It requires at least one
+   `--test-video`. Choose different held-out test videos that represent the
+   intended deployment conditions; do not use test footage to tune the model.
+6. **Review and annotate all images.** Run the bundled annotator once for
+   each split. Draw a box for every visible object from the supported classes:
+   person, bicycle, car, motorcycle, bus, and truck. Save empty label files
+   for reviewed images that contain none of those objects. The classes are
+   COCO IDs `0, 1, 2, 3, 5, 7`, which match the corresponding class IDs in the
+   included COCO checkpoint:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m scripts.annotate_yolo `
+     --images datasets\traffic\images\train `
+     --labels datasets\traffic\labels\train
+   .\.venv\Scripts\python.exe -m scripts.annotate_yolo `
+     --images datasets\traffic\images\val `
+     --labels datasets\traffic\labels\val
+   .\.venv\Scripts\python.exe -m scripts.annotate_yolo `
+     --images datasets\traffic\images\test `
+     --labels datasets\traffic\labels\test
+   ```
+
+   Check annotations for missed objects, incorrect classes, and loose or
+   inconsistent boxes. Do not use model predictions as ground truth. If using
+   a public dataset's existing annotations, first verify its class meanings,
+   box format, and class IDs and convert them only when they genuinely
+   correspond to these project classes.
+
+**Important training limitation:** This workflow prepares and labels data for
+evaluation of the included COCO detector. The repository does not currently
+provide an end-to-end training command. Do not create a six-class training
+configuration and feed it the annotator's labels unchanged: those labels use
+COCO IDs `0, 1, 2, 3, 5, 7`, not consecutive IDs `0` through `5`. Custom
+training requires a consistent class-ID mapping across labels, dataset
+configuration, evaluation, and application inference.
+
 ## Evaluate and compare YOLO models
 
-Build a starter dataset from videos you have permission to use. Assign
-different source videos to train, validation, and test so neighboring frames
-from one clip cannot leak across splits. The example below uses three local
-videos; replace the paths with your own:
-
-```powershell
-.\.venv\Scripts\python.exe -m scripts.prepare_yolo_dataset `
-  --train-video "uploads\videos\13654799_1920_1080_30fps.mp4" `
-  --val-video "uploads\videos\42479-431756043_medium.mp4" `
-  --test-video "uploads\videos\4K Road traffic video for object detection and tracking - free download now.mp4" `
-  --frames-per-video 20
-```
-
-This samples frames into `datasets\traffic\images\{train,val,test}`. A held-out
-test video is required; train and validation videos are optional unless you
-will separately train or tune a model. Use multiple representative test videos
-where possible. Annotate the held-out test images manually using the bundled
-OpenCV tool. Select the object class with keys `1`-`6` (person, bicycle, car,
-motorcycle, bus, truck), drag a box around each visible object, then press `s`
-to save and advance. Press `z` to undo, `c` to clear the current image, `b` to
-save and go back, or `q` to quit. Review negative images too and press `s` to
-save an empty label file for each one:
-
-```powershell
-.\.venv\Scripts\python.exe -m scripts.annotate_yolo `
-  --images datasets\traffic\images\test `
-  --labels datasets\traffic\labels\test
-```
-
-Repeat for `train` and `val` only if you need labels for those splits. Evaluation
-labels use standard YOLO detection format:
+Once every test image has a manually reviewed label file, run evaluation only
+on the held-out test split. The labels use standard YOLO detection format:
 `class_id x_center y_center width height`, normalized to `[0, 1]`. Class IDs
 are the corresponding COCO IDs used by the included COCO-pretrained detector.
 Do not use model-generated predictions as ground truth. Evaluation requires a
