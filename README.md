@@ -90,42 +90,6 @@ retention/deletion policy for plate and video data, and restrict file/database
 permissions. The included app is a local prototype; these controls alone do
 not make it production-ready or compliant with any jurisdiction's privacy law.
 
-## Indian helmet dataset
-
-The [Indian Helmet Detection dataset on Kaggle](https://www.kaggle.com/datasets/aryanvaid13/indian-helmet-detection-dataset)
-is installed at `datasets/indian_helmet_detection`. It contains 942 Indian-road
-images with YOLO annotations: 800 training images and 142 validation images.
-Its five classes are number plates, riders, and faces with no, good, or bad
-helmets. The current trial checkpoint is
-`runs/indian_helmet_trial/yolo26n/weights/best.pt`; it was fine-tuned for 20
-epochs on CPU and evaluated on the validation split. See
-`reports/indian_helmet_validation.json` for precision, recall, F1, mAP, and
-per-class metrics, and `reports/indian_helmet_video_demo.mp4` for a sampled
-video preview.
-
-The validation set is useful for a preliminary check, not an independent test:
-this Kaggle export has no held-out test split. Its overall mAP@0.50 in the
-current trial was about 0.55, and the rare `faceWithBadHelmet` class scored
-about 0.12. Collect permitted, representative footage, annotate a separate
-held-out set, and evaluate it before using the model for any operational
-decision. Kaggle lists the license as unknown, while the included Roboflow
-attribution file says CC BY 4.0; verify applicable terms before redistribution
-or deployment.
-
-To repeat the validation with the trained checkpoint:
-
-```powershell
-.\.venv\Scripts\python.exe -m scripts.evaluate_yolo `
-  --images "datasets\indian_helmet_detection\valid\images" `
-  --labels "datasets\indian_helmet_detection\valid\labels" `
-  --model "runs\indian_helmet_trial\yolo26n\weights\best.pt" `
-  --output "reports\indian_helmet_validation.json"
-```
-
-The trial checkpoint is separate; the app's default COCO model was not
-replaced. Never use an unvalidated automated detection as the sole basis for
-enforcement or emergency response.
-
 ## Train YOLO26n for Indian road vehicles
 
 The [Indian Driving Dataset-Detections (YOLOv11 format) on Kaggle](https://www.kaggle.com/datasets/redzapdos123/indian-driving-dataset-detections-yolov11)
@@ -218,12 +182,13 @@ existing `.env` from the ONNX version, change `YOLO_MODEL_PATH` to
 
 The detector uses CPU inference by default, full-frame plus overlapping crop
 passes for larger frames, class-aware NMS to merge crop results, and the
-project's IoU tracker. YOLO26's standard one-to-many detection path is used for
-accuracy. Live detections are drawn with class-colored boxes and
-class/confidence labels. The COCO checkpoint detects general classes such as
-people, cars, and trucks; number-plate OCR and seat-belt classification require
-separately trained compatible model weights and are not provided by the
-included model.
+project's IoU tracker. Cycle/bicycle and rickshaw detections are excluded by
+their class names; motorcycles remain included. YOLO26's standard one-to-many
+detection path is used for accuracy. Live detections are drawn with
+class-colored boxes and class/confidence labels. The COCO checkpoint detects
+general classes such as people, cars, motorcycles, buses, and trucks;
+number-plate OCR and seat-belt classification require separately trained
+compatible model weights and are not provided by the included model.
 
 ## Indian vehicle registration codes
 

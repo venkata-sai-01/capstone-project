@@ -74,6 +74,17 @@ class IoUTracker:
 class YOLO26Detector:
     TILE_FRACTION = 0.6
     TILE_SPLIT_THRESHOLD = 1.5
+    EXCLUDED_CLASS_NAMES = {
+        "bicycle",
+        "bicycles",
+        "cycle",
+        "cycles",
+        "tuk tuk",
+        "tuktuk",
+        "three wheeler",
+        "three wheelers",
+        "three wheeled vehicle",
+    }
 
     def __init__(self, model_path: str | Path, device: str = "cpu"):
         model_path = Path(model_path)
@@ -133,6 +144,19 @@ class YOLO26Detector:
             if not len(boxes):
                 continue
 
+            keep_mask = np.asarray(
+                [
+                    not self._is_excluded_class(class_id)
+                    for class_id in class_ids
+                ],
+                dtype=bool,
+            )
+            boxes = boxes[keep_mask]
+            class_ids = class_ids[keep_mask]
+            confidences = confidences[keep_mask]
+            if not len(boxes):
+                continue
+
             boxes[:, [0, 2]] += left
             boxes[:, [1, 3]] += top
             boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0, frame_width)
@@ -156,6 +180,17 @@ class YOLO26Detector:
 
         track_ids = self.tracker.update(boxes, class_ids)
         return boxes.astype(int), track_ids, class_ids, confidences, self.names
+
+    def _is_excluded_class(self, class_id: int) -> bool:
+        if class_id < 0 or class_id >= len(self.names):
+            return False
+        normalized_name = " ".join(
+            self.names[class_id].lower().replace("_", " ").replace("-", " ").split()
+        )
+        return (
+            normalized_name in self.EXCLUDED_CLASS_NAMES
+            or "rickshaw" in normalized_name
+        )
 
     def _inference_regions(
         self, image_shape: tuple[int, int]

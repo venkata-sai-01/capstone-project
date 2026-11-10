@@ -48,7 +48,6 @@ class APPoliceRadarSafetyEngine:
         "van": "car",
         "motorcycle": "bike",
         "motorbike": "bike",
-        "bicycle": "bike",
         "bus": "bus",
         "truck": "lorry",
         "lorry": "lorry",

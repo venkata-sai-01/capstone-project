@@ -36,11 +36,11 @@ class FakeModel:
 
     def __init__(self):
         self.calls: list[dict] = []
+        self.boxes = FakeBoxes([[10, 20, 50, 60]], [0], [0.9])
 
     def predict(self, **kwargs):
         self.calls.append(kwargs)
-        boxes = FakeBoxes([[10, 20, 50, 60]], [0], [0.9])
-        return [SimpleNamespace(boxes=boxes)]
+        return [SimpleNamespace(boxes=self.boxes)]
 
 
 class YOLO26InitializationTests(unittest.TestCase):
@@ -93,6 +93,30 @@ class YOLO26InferenceTests(unittest.TestCase):
         self.assertEqual(len(model.calls), 1)
         self.assertEqual(model.calls[0]["conf"], 0.3)
         self.assertEqual(model.calls[0]["device"], "cpu")
+
+    def test_excludes_cycles_and_rickshaws_but_keeps_motorcycles(self) -> None:
+        detector, model = self.detector_with_fake_model()
+        detector.names = ["cycle", "auto-rickshaw", "cycle rickshaw", "motorcycle"]
+        model.boxes = FakeBoxes(
+            [
+                [10, 20, 50, 60],
+                [60, 20, 100, 60],
+                [110, 20, 150, 60],
+                [160, 20, 200, 60],
+            ],
+            [0, 1, 2, 3],
+            [0.9, 0.9, 0.9, 0.9],
+        )
+
+        boxes, track_ids, class_ids, confidences, names = detector.infer(
+            np.zeros((100, 220, 3), dtype=np.uint8), 0.3
+        )
+
+        np.testing.assert_array_equal(boxes, [[160, 20, 200, 60]])
+        np.testing.assert_array_equal(track_ids, [1])
+        np.testing.assert_array_equal(class_ids, [3])
+        np.testing.assert_allclose(confidences, [0.9])
+        self.assertEqual(names, detector.names)
 
     def test_large_frames_use_full_frame_and_overlapping_crop_passes(self) -> None:
         detector, model = self.detector_with_fake_model()
