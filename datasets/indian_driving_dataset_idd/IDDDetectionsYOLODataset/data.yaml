@@ -1,0 +1,23 @@
+#Dataset Configurations.
+path: .
+
+names:
+- animal
+- autorickshaw
+- bicycle
+- bus
+- car
+- caravan
+- motorcycle
+- person
+- rider
+- traffic light
+- traffic sign
+- trailer
+- train
+- truck
+- vehicle fallback
+nc: 15
+test: test/images
+train: train/images
+val: val/images

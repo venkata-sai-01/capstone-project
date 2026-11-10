@@ -90,29 +90,102 @@ retention/deletion policy for plate and video data, and restrict file/database
 permissions. The included app is a local prototype; these controls alone do
 not make it production-ready or compliant with any jurisdiction's privacy law.
 
-## Validate detection accuracy
+## Indian helmet dataset
 
-Do not treat example images, unit tests, confidence values, or a successful
-inference as accuracy evidence. The checked-in traffic image splits currently
-have no matching human-reviewed YOLO labels, so this repository cannot produce
-a defensible precision/recall/mAP result yet. Collect permitted, representative
-footage; annotate every evaluation image; keep source clips separated between
-training, validation, and held-out test sets; then run the evaluator, for
-example:
+The [Indian Helmet Detection dataset on Kaggle](https://www.kaggle.com/datasets/aryanvaid13/indian-helmet-detection-dataset)
+is installed at `datasets/indian_helmet_detection`. It contains 942 Indian-road
+images with YOLO annotations: 800 training images and 142 validation images.
+Its five classes are number plates, riders, and faces with no, good, or bad
+helmets. The current trial checkpoint is
+`runs/indian_helmet_trial/yolo26n/weights/best.pt`; it was fine-tuned for 20
+epochs on CPU and evaluated on the validation split. See
+`reports/indian_helmet_validation.json` for precision, recall, F1, mAP, and
+per-class metrics, and `reports/indian_helmet_video_demo.mp4` for a sampled
+video preview.
+
+The validation set is useful for a preliminary check, not an independent test:
+this Kaggle export has no held-out test split. Its overall mAP@0.50 in the
+current trial was about 0.55, and the rare `faceWithBadHelmet` class scored
+about 0.12. Collect permitted, representative footage, annotate a separate
+held-out set, and evaluate it before using the model for any operational
+decision. Kaggle lists the license as unknown, while the included Roboflow
+attribution file says CC BY 4.0; verify applicable terms before redistribution
+or deployment.
+
+To repeat the validation with the trained checkpoint:
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.evaluate_yolo `
-  --images "datasets\traffic\images\test" `
-  --labels "datasets\traffic\labels\test" `
-  --model "assets\models\yolo26n.pt" `
-  --output "reports\yolo-evaluation.json"
+  --images "datasets\indian_helmet_detection\valid\images" `
+  --labels "datasets\indian_helmet_detection\valid\labels" `
+  --model "runs\indian_helmet_trial\yolo26n\weights\best.pt" `
+  --output "reports\indian_helmet_validation.json"
 ```
 
-Review the report's per-class precision, recall, F1, mAP, and latency on the
-actual target hardware. Define acceptance thresholds and independently review
-false positives/negatives before considering operational use. Never use an
-unvalidated automated detection as the sole basis for enforcement or emergency
-response.
+The trial checkpoint is separate; the app's default COCO model was not
+replaced. Never use an unvalidated automated detection as the sole basis for
+enforcement or emergency response.
+
+## Train YOLO26n for Indian road vehicles
+
+The [Indian Driving Dataset-Detections (YOLOv11 format) on Kaggle](https://www.kaggle.com/datasets/redzapdos123/indian-driving-dataset-detections-yolov11)
+contains about 42,000 labeled images across 15 classes, including cars,
+motorcycles, autorickshaws, buses, trucks, bicycles, and riders. The dataset
+download is about 22 GB. It is intended for academic/non-commercial research;
+review the dataset's current terms before use or redistribution.
+
+Set up Kaggle's local OAuth login (or another supported local API credential)
+without sharing tokens in chat or committing them:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install kaggle
+.\.venv\Scripts\python.exe -m kaggle auth login
+```
+
+Then download and extract the dataset:
+
+```powershell
+.\.venv\Scripts\python.exe -m kaggle datasets download `
+  redzapdos123/indian-driving-dataset-detections-yolov11 `
+  -p datasets\indian_driving_dataset_idd `
+  --unzip
+```
+
+Train from the COCO-pretrained YOLO26n checkpoint. The `batch=-1` option lets
+Ultralytics select a batch size for available GPU memory; use a CUDA-enabled
+PyTorch installation for `device=0`. This workspace currently has CPU-only
+PyTorch even though an NVIDIA GPU is present. Install a compatible Windows
+CUDA build using the [official PyTorch selector](https://pytorch.org/get-started/locally/),
+then verify `torch.cuda.is_available()` returns `True`. On a CPU-only
+installation, change it to `device=cpu`, but expect training on this full
+dataset to take substantially longer.
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.train_yolo_vehicles `
+  --epochs 100 --imgsz 640 --batch -1 --device 0 `
+  --workers 4 --patience 20 --seed 42
+```
+
+The best checkpoint is saved to
+`runs\indian_vehicle_training\yolo26n\weights\best.pt`. After training, evaluate
+on the dataset's held-out test split (not the validation split used during
+training). The dataset README says its labeled test split was created from
+original training data rather than the official test data, so treat this as an
+internal holdout and also evaluate on separately collected, representative
+footage before making accuracy claims:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.evaluate_yolo `
+  --images datasets\indian_driving_dataset_idd\IDDDetectionsYOLODataset\test\images `
+  --labels datasets\indian_driving_dataset_idd\IDDDetectionsYOLODataset\test\labels `
+  --model runs\indian_vehicle_training\yolo26n\weights\best.pt `
+  --output reports\indian_vehicle_test.json
+```
+
+This vehicle checkpoint is kept separate from the app's default COCO model.
+Review the per-class metrics and representative false positives/negatives
+before selecting it for application inference. The dataset's 15 classes differ
+from COCO, so downstream features must be checked against those class names.
 
 The e-challan gateway defaults to local sandbox simulation. Selecting
 `--env PRODUCTION` alone does not enable external transmission: dispatch is
