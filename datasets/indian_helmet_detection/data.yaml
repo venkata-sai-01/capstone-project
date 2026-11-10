@@ -1,0 +1,18 @@
+path: .
+train: train/images
+val: valid/images
+
+nc: 5
+names:
+  0: numberPlate
+  1: faceWithNoHelmet
+  2: faceWithGoodHelmet
+  3: faceWithBadHelmet
+  4: rider
+
+roboflow:
+  workspace: yolo-ftygl
+  project: aryan_1
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/yolo-ftygl/aryan_1/dataset/1
