@@ -1,0 +1,26 @@
+{
+  "source_video": "uploads\\videos\\13654799_1920_1080_30fps.mp4",
+  "checkpoint": "runs\\indian_helmet_trial\\yolo26n\\weights\\best.pt",
+  "inference_pipeline": "src.yolo_detector.YOLO26Detector.infer (640px tiled inference, class-wise NMS, IoU tracking)",
+  "source_resolution": [
+    1920,
+    1080
+  ],
+  "source_fps": 30.0,
+  "duration_seconds": 20.833333333333332,
+  "sampling_interval_seconds": 1.0,
+  "sampled_frames": 21,
+  "frames_with_detections": 21,
+  "confidence_threshold": 0.25,
+  "detections_by_class": {
+    "faceWithGoodHelmet": 56,
+    "numberPlate": 17,
+    "rider": 117
+  },
+  "mean_confidence_by_class": {
+    "faceWithGoodHelmet": 0.4314,
+    "numberPlate": 0.3787,
+    "rider": 0.4592
+  },
+  "warning": "Sampled-video detections are qualitative only; this video has no matching ground-truth labels and is not an accuracy measurement."
+}
